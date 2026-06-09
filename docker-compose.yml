@@ -1,0 +1,59 @@
+# FabLab Winti – Produktion
+# Kompatibel mit Docker 17.x+ (Synology DSM 6.2)
+#
+# Vor dem ersten Start:
+#   1. cp .env.example .env  und Werte anpassen
+#   2. SSL-Zertifikat in ./certs/ ablegen ODER Synology Reverse Proxy verwenden
+#   3. docker-compose up -d
+
+version: "3.3"
+
+services:
+
+  db:
+    image: mariadb:10.11
+    platform: linux/arm64   # RPi 4/5; für RPi 3: linux/arm/v7
+    container_name: fablabwinti_db
+    mem_limit: 512m
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}"
+      MYSQL_DATABASE:      "${DB_NAME}"
+      MYSQL_USER:          "${DB_USER}"
+      MYSQL_PASSWORD:      "${DB_PASSWORD}"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/02_init.sql
+    ports:
+      - "3308:3306"
+    networks:
+      - fablabwinti
+
+  app:
+    build: .
+    image: fablabwinti_app:latest
+    container_name: fablabwinti_app
+    mem_limit: 256m
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3003}:3003"
+    environment:
+      DB_HOST:     "db"
+      DB_PORT:     "3306"
+      NODE_ENV:    "production"
+    env_file: .env
+    depends_on:
+      - db
+    volumes:
+      - ./certs:/app/certs
+      - ./logs:/app/logs
+      - ./migration/input:/app/migration/input
+    networks:
+      - fablabwinti
+
+volumes:
+  db_data:
+
+networks:
+  fablabwinti:

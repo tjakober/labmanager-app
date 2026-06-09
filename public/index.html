@@ -1,0 +1,3586 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FabLab Winti – Labmanager App</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans" x-data="app()" x-cloak>
+
+<!-- ── Toast ────────────────────────────────────────────────────────────── -->
+<div x-show="toast" x-transition.opacity
+     class="fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-xs"
+     :class="toast?.type === 'error' ? 'bg-red-600' : 'bg-green-600'"
+     x-text="toast?.msg"></div>
+
+<!-- ── Login / Reset ───────────────────────────────────────────────────────── -->
+<div x-show="!token" class="min-h-screen flex items-center justify-center bg-gray-900">
+  <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
+    <div class="text-center mb-6">
+      <h1 class="text-2xl font-bold text-gray-800">FabLab Winti</h1>
+      <p class="text-gray-400 text-sm mt-1">Labmanager App</p>
+    </div>
+
+    <!-- Login-Formular -->
+    <form x-show="loginView === 'login'" @submit.prevent="login">
+      <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail oder Badge-UID</label>
+      <input x-model="loginEmail" type="text" required autocomplete="username"
+        @input="loginError = ''; badgeNeedsPassword = false"
+        :class="loginEmail && !/^\d+$/.test(loginEmail) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail) ? 'border-amber-400' : ''"
+        class="w-full border rounded-lg px-3 py-2 text-sm mb-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <p x-show="loginEmail && !/^\d+$/.test(loginEmail) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)"
+         class="text-amber-600 text-xs mb-2">Ungültige E-Mail-Adresse (Format: name@domain.ch)</p>
+      <div class="mb-2"></div>
+      <div x-show="!/^\d+$/.test(loginEmail) || badgeNeedsPassword">
+        <label class="block text-xs font-medium text-gray-600 mb-1">Passwort</label>
+        <div class="relative mb-4">
+          <input x-model="loginPassword" :type="showPw ? 'text' : 'password'" autocomplete="current-password"
+            class="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <button type="button" @click="showPw=!showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+            <span x-text="showPw ? '🙈' : '👁'"></span>
+          </button>
+        </div>
+      </div>
+      <p x-show="loginError" x-text="loginError" class="text-red-500 text-xs mb-3"></p>
+      <button type="submit" :disabled="loginLoading"
+        class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+        <span x-text="loginLoading ? 'Anmelden…' : 'Anmelden'"></span>
+      </button>
+      <p class="text-center mt-4">
+        <button type="button" @click="loginView='reset-request'; loginError=''"
+          class="text-xs text-blue-600 hover:underline">Passwort vergessen?</button>
+      </p>
+    </form>
+
+    <!-- Passwort-Reset anfordern -->
+    <form x-show="loginView === 'reset-request'" @submit.prevent="requestReset">
+      <p class="text-sm text-gray-600 mb-4">Gib deine E-Mail-Adresse ein. Du erhältst einen Link zum Zurücksetzen des Passworts.</p>
+      <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail</label>
+      <input x-model="loginEmail" type="email" required
+        class="w-full border rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <p x-show="loginError" x-text="loginError" class="text-red-500 text-xs mb-3"></p>
+      <p x-show="resetMsg" x-text="resetMsg" class="text-green-600 text-xs mb-3"></p>
+      <button type="submit" :disabled="loginLoading"
+        class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+        <span x-text="loginLoading ? 'Sende…' : 'Reset-Link senden'"></span>
+      </button>
+      <p class="text-center mt-4">
+        <button type="button" @click="loginView='login'; loginError=''; resetMsg=''"
+          class="text-xs text-blue-600 hover:underline">← Zurück zum Login</button>
+      </p>
+    </form>
+
+    <!-- Neues Passwort setzen (via ?reset=TOKEN in URL) -->
+    <form x-show="loginView === 'reset-confirm'" @submit.prevent="confirmReset">
+      <p class="text-sm text-gray-600 mb-4">Setze ein neues Passwort (mind. 8 Zeichen).</p>
+      <label class="block text-xs font-medium text-gray-600 mb-1">Neues Passwort</label>
+      <div class="relative mb-3">
+        <input x-model="resetPassword" :type="showPw ? 'text' : 'password'" required minlength="8" autocomplete="new-password"
+          class="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button type="button" @click="showPw=!showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+          <span x-text="showPw ? '🙈' : '👁'"></span>
+        </button>
+      </div>
+      <label class="block text-xs font-medium text-gray-600 mb-1">Passwort wiederholen</label>
+      <div class="relative mb-4">
+        <input x-model="resetPassword2" :type="showPw ? 'text' : 'password'" required minlength="8" autocomplete="new-password"
+          class="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <p x-show="loginError" x-text="loginError" class="text-red-500 text-xs mb-3"></p>
+      <button type="submit" :disabled="loginLoading"
+        class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+        <span x-text="loginLoading ? 'Speichern…' : 'Passwort speichern'"></span>
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ── App Shell ──────────────────────────────────────────────────────────── -->
+<div x-show="token" class="flex h-screen overflow-hidden">
+
+  <!-- Sidebar -->
+  <aside class="w-52 bg-gray-900 text-gray-200 flex flex-col flex-shrink-0">
+    <div class="px-4 py-5 border-b border-gray-700">
+      <p class="text-white font-bold truncate">FabLab Winti</p>
+      <p class="text-gray-400 text-xs truncate mt-0.5" x-text="user?.name || ''"></p>
+    </div>
+    <nav class="flex-1 px-2 py-3 space-y-1 overflow-y-auto">
+      <template x-for="item in navItems()" :key="item.id">
+        <button @click="navigate(item.id)"
+          class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors"
+          :class="view === item.id ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'">
+          <span x-text="item.icon" class="w-5 text-center"></span>
+          <span x-text="item.label"></span>
+        </button>
+      </template>
+    </nav>
+    <div class="px-4 py-4 border-t border-gray-700">
+      <button @click="logout" class="text-gray-400 hover:text-white text-xs transition-colors">Abmelden</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 overflow-y-auto">
+
+    <!-- ══ Members ══════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'members'" class="flex h-full">
+
+      <!-- List panel -->
+      <div class="w-72 flex-shrink-0 bg-white border-r flex flex-col h-full">
+        <div class="p-4 border-b space-y-2">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold text-gray-800 text-sm">Mitglieder</h2>
+            <button x-show="isAdmin" @click="openNewMember"
+              class="px-2 py-1 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700">+ Neu</button>
+          </div>
+          <div class="flex gap-2">
+            <input x-model="membersSearch" @input.debounce.400ms="loadMembers"
+              x-ref="membersSearchInput"
+              type="text" placeholder="Name / E-Mail / Badge-UID…"
+              class="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button @click="startBadgeScan" title="Badge scannen"
+              class="px-2 py-1 border rounded-lg text-sm hover:bg-gray-100">🏷️</button>
+          </div>
+          <div class="flex gap-2">
+            <select x-model="membersActive" @change="loadMembers"
+              class="flex-1 border rounded-lg px-2 py-1 text-xs bg-white">
+              <option value="">Alle</option>
+              <option value="1">Aktiv</option>
+              <option value="0">Inaktiv</option>
+            </select>
+            <select x-model="membersRole" @change="loadMembers"
+              class="flex-1 border rounded-lg px-2 py-1 text-xs bg-white">
+              <option value="">Alle Rollen</option>
+              <option value="admin">Admin</option>
+              <option value="labmanager">Labmanager</option>
+              <option value="member">Member</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex-1 overflow-y-auto">
+          <div x-show="membersLoading" class="p-4 text-center text-gray-400 text-sm">Lädt…</div>
+          <div x-show="!membersLoading && members.length === 0"
+               class="p-4 text-center text-gray-400 text-sm">Keine Einträge</div>
+          <template x-for="m in members" :key="m.id">
+            <button @click="selectMember(m)"
+              class="w-full text-left px-4 py-3 border-b hover:bg-blue-50 transition-colors"
+              :class="selectedMember?.id === m.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'">
+              <div class="flex items-center justify-between">
+                <span class="font-medium text-sm text-gray-800 truncate" x-text="m.name"></span>
+                <span class="text-xs" :class="m.active ? 'text-green-500' : 'text-gray-300'"
+                      x-text="m.active ? '●' : '○'"></span>
+              </div>
+              <p class="text-xs text-gray-400 truncate mt-0.5" x-text="m.email"></p>
+              <div class="flex gap-1 mt-1 flex-wrap">
+                <template x-for="r in (m.roles||[])" :key="r">
+                  <span class="text-xs px-1.5 py-0.5 rounded-full"
+                    :class="r==='admin' ? 'bg-blue-100 text-blue-700' : r==='labmanager' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500'"
+                    x-text="r"></span>
+                </template>
+              </div>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="flex-1 overflow-y-auto bg-gray-50">
+        <div x-show="!selectedMember" class="flex items-center justify-center h-full text-gray-300 text-sm select-none">
+          ← Mitglied auswählen
+        </div>
+        <div x-show="selectedMember" class="p-6">
+          <!-- Header -->
+          <div class="flex items-start justify-between mb-5">
+            <div>
+              <h2 class="text-xl font-bold text-gray-800" x-text="selectedMember?.name"></h2>
+              <p class="text-gray-500 text-sm" x-text="selectedMember?.email"></p>
+              <div class="flex gap-2 mt-2 flex-wrap">
+                <template x-for="r in (selectedMember?.roles||[])" :key="r">
+                  <span class="text-xs px-2 py-0.5 rounded-full"
+                    :class="r==='admin' ? 'bg-blue-100 text-blue-700' : r==='labmanager' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'"
+                    x-text="r"></span>
+                </template>
+                <span class="text-xs px-2 py-0.5 rounded-full"
+                  :class="selectedMember?.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'"
+                  x-text="selectedMember?.active ? 'Aktiv' : 'Inaktiv'"></span>
+              </div>
+            </div>
+            <button @click="openInvoicePreview" x-show="isPrivileged"
+              class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
+              Rechnung erstellen
+            </button>
+          </div>
+
+          <!-- Tab bar -->
+          <div class="border-b mb-4">
+            <nav class="-mb-px flex gap-5 text-sm overflow-x-auto">
+              <template x-for="tab in memberTabs" :key="tab.id">
+                <button @click="setMemberTab(tab.id)"
+                  class="pb-2 font-medium whitespace-nowrap transition-colors"
+                  :class="memberTab === tab.id ? 'tab-active' : 'text-gray-500 hover:text-gray-700'"
+                  x-text="tab.label"></button>
+              </template>
+            </nav>
+          </div>
+
+          <!-- Tab: Info -->
+          <div x-show="memberTab === 'info'" class="text-sm">
+            <dl class="grid grid-cols-2 gap-4">
+              <div>
+                <dt class="text-xs text-gray-400 mb-0.5">Mitglieder-ID</dt>
+                <dd class="font-medium" x-text="selectedMember?.webling?.mitglieder_id || selectedMember?.webling_id || '–'"></dd>
+              </div>
+
+              <!-- Webling fields: labmanager/admin only -->
+              <template x-if="isLabmanager && selectedMember?.webling">
+                <div class="col-span-2 border-t pt-3 mt-1 space-y-2">
+                  <div x-show="selectedMember.webling.status">
+                    <dt class="text-xs text-gray-400 mb-0.5">Status</dt>
+                    <dd class="font-semibold text-blue-700" x-text="selectedMember.webling.status"></dd>
+                  </div>
+                  <div x-show="selectedMember.webling.strasse || selectedMember.webling.plz">
+                    <dt class="text-xs text-gray-400 mb-0.5">Adresse</dt>
+                    <dd>
+                      <span x-text="selectedMember.webling.strasse || ''"></span>
+                      <span x-show="selectedMember.webling.adresszusatz" x-text="', ' + selectedMember.webling.adresszusatz"></span>
+                      <br x-show="selectedMember.webling.plz || selectedMember.webling.ort">
+                      <span x-text="[selectedMember.webling.plz, selectedMember.webling.ort].filter(Boolean).join(' ')"></span>
+                    </dd>
+                  </div>
+                  <div x-show="selectedMember.webling.mobile || selectedMember.webling.telefon">
+                    <dt class="text-xs text-gray-400 mb-0.5">Kontakt</dt>
+                    <dd>
+                      <span x-show="selectedMember.webling.mobile" x-text="'Mobile: ' + selectedMember.webling.mobile"></span>
+                      <span x-show="selectedMember.webling.mobile && selectedMember.webling.telefon"> · </span>
+                      <span x-show="selectedMember.webling.telefon" x-text="'Tel: ' + selectedMember.webling.telefon"></span>
+                    </dd>
+                  </div>
+                  <div x-show="selectedMember.webling.firma">
+                    <dt class="text-xs text-gray-400 mb-0.5">Firma</dt>
+                    <dd x-text="selectedMember.webling.firma"></dd>
+                  </div>
+                  <div x-show="selectedMember.webling.funktion">
+                    <dt class="text-xs text-gray-400 mb-0.5">Funktion</dt>
+                    <dd x-text="selectedMember.webling.funktion"></dd>
+                  </div>
+                  <div x-show="selectedMember.webling.eintrittsdatum">
+                    <dt class="text-xs text-gray-400 mb-0.5">Eintritt</dt>
+                    <dd x-text="selectedMember.webling.eintrittsdatum"></dd>
+                  </div>
+                  <div x-show="selectedMember.webling.austrittsdatum">
+                    <dt class="text-xs text-gray-400 mb-0.5">Austritt</dt>
+                    <dd x-text="selectedMember.webling.austrittsdatum"></dd>
+                  </div>
+                  <div x-show="selectedMember.webling.geburtsdatum">
+                    <dt class="text-xs text-gray-400 mb-0.5">Geburtsdatum</dt>
+                    <dd x-text="selectedMember.webling.geburtsdatum"></dd>
+                  </div>
+                  <div x-show="selectedMember.webling.bemerkungen">
+                    <dt class="text-xs text-gray-400 mb-0.5">Bemerkungen</dt>
+                    <dd class="text-gray-600 whitespace-pre-wrap" x-text="selectedMember.webling.bemerkungen"></dd>
+                  </div>
+                </div>
+              </template>
+
+              <div class="col-span-2">
+                <dt class="text-xs text-gray-400 mb-1">Skills</dt>
+                <dd>
+                  <div class="flex flex-wrap gap-1.5 mb-2">
+                    <template x-for="k in (selectedMember?.knowledge||[])" :key="k.id">
+                      <span class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">
+                        <span x-text="k.name"></span>
+                        <button x-show="canEdit()" @click="removeKnowledge(k.id)"
+                          class="hover:text-red-600 leading-none">&times;</button>
+                      </span>
+                    </template>
+                    <span x-show="!(selectedMember?.knowledge||[]).length" class="text-gray-400 text-sm">–</span>
+                  </div>
+                  <div x-show="canEdit()" class="flex gap-2 mt-1">
+                    <select x-model="knowledgeToAdd" class="input-sm flex-1 text-sm border rounded px-2 py-1">
+                      <option value="">Skill hinzufügen…</option>
+                      <template x-for="k in allKnowledge" :key="k.id">
+                        <option :value="k.id" x-text="k.name"
+                          :disabled="(selectedMember?.knowledge||[]).some(e => e.id === k.id)"></option>
+                      </template>
+                    </select>
+                    <button @click="addKnowledge()" :disabled="!knowledgeToAdd"
+                      class="btn-sm px-3 py-1 bg-blue-600 text-white rounded text-sm disabled:opacity-40">+</button>
+                    <button @click="openNewKnowledge()"
+                      class="btn-sm px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm" title="Neuen Skill anlegen">Neu</button>
+                  </div>
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <!-- Tab: Balance -->
+          <div x-show="memberTab === 'balance'">
+            <div x-show="memberBalanceLoading" class="text-gray-400 text-sm">Lädt…</div>
+            <div x-show="!memberBalanceLoading">
+              <p class="text-3xl font-bold"
+                 :class="(memberBalance||0) >= 0 ? 'text-green-600' : 'text-red-600'">
+                CHF <span x-text="memberBalance !== null ? Number(memberBalance).toFixed(2) : '–'"></span>
+              </p>
+              <p class="text-xs text-gray-400 mt-1">Quelle: Webling (Live)</p>
+            </div>
+          </div>
+
+          <!-- Tab: Rights -->
+          <div x-show="memberTab === 'rights'">
+
+            <!-- Labmanager: Checkbox-Grid -->
+            <template x-if="canEdit()">
+              <div class="space-y-2">
+
+                <!-- Badge-Auswahl -->
+                <div x-show="memberTags.filter(t => !t.blocked).length > 1" class="flex items-center gap-2 text-xs">
+                  <span class="text-gray-500">Badge:</span>
+                  <select x-model="rightsActiveTagId"
+                    class="border rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <template x-for="t in memberTags.filter(t => !t.blocked)" :key="t.id">
+                      <option :value="t.id" x-text="t.id"></option>
+                    </template>
+                  </select>
+                </div>
+                <div x-show="memberTags.filter(t => !t.blocked).length === 1" class="text-xs text-gray-400">
+                  Badge: <span class="font-mono" x-text="memberTags.find(t => !t.blocked)?.id"></span>
+                </div>
+                <div x-show="memberTags.filter(t => !t.blocked).length === 0"
+                     class="text-amber-600 text-xs">Kein aktiver Badge vorhanden — zuerst Badge ausgeben.</div>
+
+                <!-- Maschinenliste mit Checkboxen -->
+                <div x-show="rightsActiveTagId" class="space-y-1">
+                  <template x-for="m in allMachines.filter(m => m.active)" :key="m.id">
+                    <div>
+                      <template x-if="true">
+                        <div class="border rounded-lg px-3 py-2 bg-white text-sm"
+                             :class="getRightForMachine(m.id) && !isRightExpired(getRightForMachine(m.id)) ? 'border-green-200' :
+                                     getRightForMachine(m.id) ? 'border-gray-200 opacity-60' : 'border-gray-100'">
+                          <div class="flex items-center gap-3">
+                            <!-- Checkbox -->
+                            <input type="checkbox"
+                              :checked="!!getRightForMachine(m.id)"
+                              @change="toggleMachineRight(m, $event.target.checked)"
+                              :disabled="!rightsActiveTagId"
+                              class="w-4 h-4 accent-blue-600 cursor-pointer">
+
+                            <!-- Name + Status -->
+                            <span class="font-medium flex-1" x-text="m.name"></span>
+                            <span x-show="getRightForMachine(m.id) && !isRightExpired(getRightForMachine(m.id))"
+                                  class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">Aktiv</span>
+                            <span x-show="getRightForMachine(m.id) && isRightExpired(getRightForMachine(m.id))"
+                                  class="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">Abgelaufen</span>
+
+                            <!-- Datum-Inputs (nur wenn Recht vorhanden) -->
+                            <template x-if="getRightForMachine(m.id)">
+                              <div class="flex gap-1.5 items-center text-xs text-gray-500">
+                                <input type="date"
+                                  :value="getRightForMachine(m.id).valid_from?.slice(0,10) || ''"
+                                  @change="updateRightDate(getRightForMachine(m.id), 'valid_from', $event.target.value)"
+                                  class="border rounded px-1.5 py-0.5 text-xs w-32">
+                                <span>–</span>
+                                <input type="date"
+                                  :value="getRightForMachine(m.id).valid_to?.slice(0,10) || ''"
+                                  @change="updateRightDate(getRightForMachine(m.id), 'valid_to', $event.target.value)"
+                                  class="border rounded px-1.5 py-0.5 text-xs w-32">
+                                <button @click="clearRightDate(getRightForMachine(m.id))"
+                                  class="text-gray-400 hover:text-gray-600" title="Ablaufdatum löschen">×</button>
+                              </div>
+                            </template>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Member: nur aktive Rechte readonly -->
+            <template x-if="!canEdit()">
+              <div class="space-y-2">
+                <div x-show="memberRights.length === 0" class="text-sm text-gray-400">Keine Maschinenrechte vorhanden.</div>
+                <template x-for="r in memberRights" :key="r.id">
+                  <div class="bg-white rounded-lg p-3 border text-sm">
+                    <p class="font-medium" x-text="r.machine_name"></p>
+                    <p class="text-xs text-gray-400 mt-0.5"
+                       x-text="r.valid_to ? 'bis ' + fmtDate(r.valid_to) : 'unbegrenzt'"></p>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+          </div>
+
+          <!-- Tab: Tags -->
+          <div x-show="memberTab === 'tags'" class="space-y-3">
+            <div class="flex gap-2" x-show="isPrivileged">
+              <input x-model="newTagId" type="text" placeholder="Badge-ID (NFC-UID)"
+                @keyup.enter="issueTag"
+                class="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <button @click="issueTag"
+                class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Ausgeben</button>
+            </div>
+            <div x-show="memberTags.length === 0" class="text-sm text-gray-400">Keine Badges vorhanden.</div>
+            <template x-for="t in memberTags" :key="t.id">
+              <div class="bg-white rounded-lg p-3 border text-sm"
+                :class="t.blocked ? 'opacity-60' : ''">
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <p class="font-mono text-xs font-medium" x-text="t.id"></p>
+                    <p class="text-xs text-gray-400" x-text="'Erstellt: ' + fmtDate(t.created_at)"></p>
+                    <p x-show="t.replacement_id" class="text-xs text-orange-500 mt-0.5">
+                      Verloren – Ersatzkarte: <span class="font-mono" x-text="t.replacement_id"></span>
+                    </p>
+                    <p x-show="t.blocked && !t.replacement_id" class="text-xs text-red-500 mt-0.5">Gesperrt</p>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                    <span x-show="t.blocked && t.replacement_id"
+                      class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">Verloren</span>
+                    <span x-show="t.blocked && !t.replacement_id"
+                      class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Gesperrt</span>
+                    <span x-show="!t.blocked"
+                      class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Aktiv</span>
+                    <!-- Aktive Karte: sperren oder als verloren melden -->
+                    <button x-show="!t.blocked && isPrivileged" @click="blockTagPrompt(t)"
+                      class="text-xs text-red-500 hover:underline">Sperren</button>
+                    <button x-show="!t.blocked && isPrivileged" @click="replaceTagPrompt(t)"
+                      class="text-xs text-blue-500 hover:underline">Verloren gemeldet</button>
+                    <button x-show="isPrivileged" @click="deleteTagPrompt(t)"
+                      class="text-xs text-gray-400 hover:text-red-500 hover:underline">Löschen</button>
+                    <!-- Verlorene Karte gefunden: Karte zurückgegeben -->
+                    <button x-show="t.blocked && t.replacement_id && isPrivileged"
+                      @click="returnTagPrompt(t)"
+                      class="text-xs bg-green-600 text-white px-2 py-0.5 rounded hover:bg-green-700">
+                      Karte zurückgegeben
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Tab: Logs -->
+          <div x-show="memberTab === 'logs'">
+            <div x-show="memberLogs.length === 0" class="text-sm text-gray-400">Keine Maschinennutzung.</div>
+            <table x-show="memberLogs.length > 0" class="w-full text-xs">
+              <thead class="text-gray-400 border-b">
+                <tr>
+                  <th class="text-left pb-2 font-medium">Datum</th>
+                  <th class="text-left pb-2 font-medium">Maschine</th>
+                  <th class="text-left pb-2 font-medium">Ereignis</th>
+                  <th class="text-left pb-2 font-medium">Rechnung</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y">
+                <template x-for="l in memberLogs" :key="l.id">
+                  <tr class="text-gray-700">
+                    <td class="py-2" x-text="fmtDate(l.created_at) + ' ' + new Date(l.created_at).toLocaleTimeString('de-CH', {hour:'2-digit',minute:'2-digit'})"></td>
+                    <td class="py-2" x-text="l.machine_name"></td>
+                    <td class="py-2" x-text="l.event_name"></td>
+                    <td class="py-2 text-gray-400" x-text="l.invoice_id ? '#' + l.invoice_id : '–'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tab: Invoices -->
+          <div x-show="memberTab === 'invoices'" class="space-y-2">
+            <div x-show="memberInvoices.length === 0" class="text-sm text-gray-400">Keine Rechnungen vorhanden.</div>
+            <template x-for="inv in memberInvoices" :key="inv.id">
+              <div class="bg-white rounded-lg border text-sm overflow-hidden">
+                <!-- Header row (always visible, clickable) -->
+                <div class="p-3 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                     @click="toggleInvoiceDetail(inv)">
+                  <div>
+                    <p class="font-medium">Rechnung #<span x-text="inv.id"></span></p>
+                    <p class="text-xs text-gray-400"
+                       x-text="fmtDate(inv.created_at) + ' · ' + (inv.paymode || 'Offen')"></p>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <span class="font-semibold" x-text="'CHF ' + Number(inv.total).toFixed(2)"></span>
+                    <span class="text-gray-400 text-xs" x-text="invoiceDetailId === inv.id ? '▲' : '▼'"></span>
+                  </div>
+                </div>
+                <!-- Detail panel -->
+                <div x-show="invoiceDetailId === inv.id" class="border-t px-3 pb-3 pt-2 bg-gray-50 space-y-2">
+                  <div x-show="invoiceDetailLoading" class="text-xs text-gray-400">Lade…</div>
+                  <template x-if="!invoiceDetailLoading && invoiceDetail">
+                    <div class="space-y-2">
+                      <!-- Dates -->
+                      <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <p class="text-gray-400">Rechnungsdatum</p>
+                          <p class="font-medium" x-text="fmtDate(invoiceDetail.invoice.created_at)"></p>
+                        </div>
+                        <div>
+                          <p class="text-gray-400">Zahldatum</p>
+                          <p class="font-medium" x-text="invoiceDetail.invoice.paid_at ? fmtDate(invoiceDetail.invoice.paid_at) : '—'"></p>
+                        </div>
+                        <div>
+                          <p class="text-gray-400">Zahlungsart</p>
+                          <p class="font-medium" x-text="invoiceDetail.invoice.paymode || 'Offen'"></p>
+                        </div>
+                        <div x-show="invoiceDetail.invoice.created_by_name">
+                          <p class="text-gray-400">Ausgestellt von</p>
+                          <p class="font-medium" x-text="invoiceDetail.invoice.created_by_name"></p>
+                        </div>
+                        <div>
+                          <p class="text-gray-400">Total</p>
+                          <p class="font-medium" x-text="'CHF ' + Number(invoiceDetail.invoice.total).toFixed(2)"></p>
+                        </div>
+                      </div>
+                      <!-- Maschinenzeit -->
+                      <template x-if="invoiceDetail.machine_lines && invoiceDetail.machine_lines.length > 0">
+                        <div>
+                          <p class="text-xs text-gray-400 mb-1">Maschinenzeit</p>
+                          <table class="w-full text-xs">
+                            <thead>
+                              <tr class="text-gray-400 border-b">
+                                <th class="text-left pb-0.5 font-medium">Maschine</th>
+                                <th class="text-left pb-0.5 font-medium pl-2">Start</th>
+                                <th class="text-right pb-0.5 font-medium pl-2">Laufzeit</th>
+                                <th class="text-right pb-0.5 font-medium pl-2">Betrag</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="(line, i) in invoiceDetail.machine_lines" :key="i">
+                                <tr class="border-b border-gray-100">
+                                  <td class="py-0.5 text-gray-700" x-text="line.machine_name"></td>
+                                  <td class="py-0.5 pl-2 text-gray-500 whitespace-nowrap" x-text="fmtRoundedDateTime(line.startIso)"></td>
+                                  <td class="py-0.5 pl-2 text-right text-gray-600 whitespace-nowrap" x-text="fmtDuration(line.usageSeconds)"></td>
+                                  <td class="py-0.5 pl-2 text-right font-medium tabular-nums" x-text="Number(line.price).toFixed(2)"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </template>
+
+                      <!-- Artikel-Tabelle (bestehende + neue Zeile) -->
+                      <template x-if="invoiceDetail.items.filter(i => !i.is_correction).length > 0 || detailPendingArticle">
+                        <div>
+                          <p class="text-xs text-gray-400 mb-1">Artikel</p>
+                          <table class="w-full text-xs">
+                            <thead><tr class="text-gray-400 border-b">
+                              <th class="text-left pb-0.5 font-medium">Artikel</th>
+                              <th class="text-right pb-0.5 font-medium pl-2">Stk.</th>
+                              <th class="text-right pb-0.5 font-medium pl-2">Einzel</th>
+                              <th class="text-right pb-0.5 font-medium pl-2">Betrag</th>
+                              <template x-if="!inv.paymode && isLabmanager"><th class="pb-0.5 w-5"></th></template>
+                            </tr></thead>
+                            <tbody>
+                              <!-- Bestehende Artikel-Zeilen -->
+                              <template x-for="item in invoiceDetail.items.filter(i => !i.is_correction)" :key="item.id">
+                                <tr class="border-b border-gray-100">
+                                  <td class="py-1 text-gray-700" x-text="item.description"></td>
+                                  <td class="py-1 pl-2 text-right tabular-nums" x-text="item.quantity"></td>
+                                  <td class="py-1 pl-2 text-right tabular-nums text-gray-500" x-text="Number(item.unit_price).toFixed(2)"></td>
+                                  <td class="py-1 pl-2 text-right font-medium tabular-nums" x-text="Number(item.total).toFixed(2)"></td>
+                                  <template x-if="!inv.paymode && isLabmanager">
+                                    <td class="py-1 pl-1 text-center">
+                                      <button @click="deleteInvoiceItem(inv, item)" class="text-red-400 hover:text-red-600">✕</button>
+                                    </td>
+                                  </template>
+                                </tr>
+                              </template>
+                              <!-- Neue Eingabe-Zeile -->
+                              <template x-if="detailPendingArticle">
+                                <tr class="border-b border-blue-100 bg-blue-50">
+                                  <td class="py-1 text-gray-700 font-medium" x-text="detailPendingArticle.name"></td>
+                                  <td class="py-1 pl-2 text-right">
+                                    <input type="number" min="1" step="1" x-model.number="detailPendingArticle.qty"
+                                      @input="detailPendingArticle.total = +(detailPendingArticle.qty * detailPendingArticle.unit_price).toFixed(2)"
+                                      class="w-14 border rounded px-1 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400">
+                                  </td>
+                                  <td class="py-1 pl-2 text-right tabular-nums text-gray-500" x-text="Number(detailPendingArticle.unit_price).toFixed(2)"></td>
+                                  <td class="py-1 pl-2 text-right font-medium tabular-nums" x-text="Number(detailPendingArticle.total).toFixed(2)"></td>
+                                  <td class="py-1 pl-1 text-center">
+                                    <button @click="savePendingArticle(inv)"
+                                      class="text-green-600 hover:text-green-800 font-bold text-sm leading-none" title="Speichern">✓</button>
+                                  </td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </template>
+
+                      <!-- Artikel-Auswahl (nur offene Rechnung, Labmanager) -->
+                      <template x-if="!inv.paymode && isLabmanager && invoiceArticles.length > 0 && !detailPendingArticle">
+                        <select @change="detailSelectArticle($event.target.value); $event.target.value=''"
+                          class="w-full border rounded px-2 py-1 text-xs mt-1 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                          <option value="">+ Artikel hinzufügen…</option>
+                          <template x-for="a in invoiceArticles" :key="a.id">
+                            <option :value="a.id" x-text="a.name"></option>
+                          </template>
+                        </select>
+                      </template>
+
+                      <!-- Korrektur-Zeile -->
+                      <div class="mt-2">
+                        <!-- Bestehende Korrektur anzeigen -->
+                        <template x-if="invoiceDetail.items.find(i => i.is_correction)">
+                          <div class="border rounded bg-amber-50 p-2 text-xs">
+                            <template x-if="!correctionEditing">
+                              <div class="flex items-start justify-between gap-2">
+                                <div>
+                                  <p class="font-medium text-amber-800 text-xs mb-0.5">Korrektur</p>
+                                  <p class="text-gray-700 whitespace-pre-wrap" x-text="invoiceDetail.items.find(i => i.is_correction).description"></p>
+                                </div>
+                                <div class="text-right shrink-0">
+                                  <p class="font-semibold tabular-nums"
+                                     :class="Number(invoiceDetail.items.find(i=>i.is_correction).total) < 0 ? 'text-red-600' : ''"
+                                     x-text="'CHF ' + Number(invoiceDetail.items.find(i=>i.is_correction).total).toFixed(2)"></p>
+                                  <button x-show="!inv.paymode && isLabmanager" @click="startEditCorrection(inv)"
+                                    class="text-blue-500 hover:underline text-xs mt-0.5">Bearbeiten</button>
+                                </div>
+                              </div>
+                            </template>
+                            <template x-if="correctionEditing">
+                              <div class="space-y-1">
+                                <textarea x-model="correctionText" rows="3"
+                                  class="w-full border rounded px-2 py-1 text-xs resize-y focus:outline-none focus:ring-2 focus:ring-amber-400"></textarea>
+                                <div class="flex gap-2">
+                                  <input x-model.number="correctionAmount" type="number" step="0.01" placeholder="Betrag"
+                                    class="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400">
+                                  <button @click="saveCorrection(inv)" :disabled="correctionSaving"
+                                    class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 disabled:opacity-40">
+                                    <span x-text="correctionSaving ? 'Lädt…' : 'Speichern'"></span>
+                                  </button>
+                                  <button @click="correctionEditing=false" class="px-2 py-1 bg-gray-100 rounded text-xs">Abbrechen</button>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                        <!-- Noch keine Korrektur: Button anzeigen -->
+                        <template x-if="!invoiceDetail.items.find(i => i.is_correction)">
+                          <div>
+                            <template x-if="!correctionEditing">
+                              <button x-show="!inv.paymode && isLabmanager"
+                                @click="correctionEditing=true; correctionText=''; correctionAmount=''"
+                                class="text-xs text-amber-700 hover:underline border border-amber-300 rounded px-2 py-1 bg-amber-50">
+                                + Korrektur hinzufügen
+                              </button>
+                            </template>
+                            <template x-if="correctionEditing">
+                              <div class="border rounded bg-amber-50 p-2 space-y-1">
+                                <p class="text-xs font-medium text-amber-800">Korrektur</p>
+                                <textarea x-model="correctionText" rows="3" placeholder="Beschreibung (mehrzeilig)…"
+                                  class="w-full border rounded px-2 py-1 text-xs resize-y focus:outline-none focus:ring-2 focus:ring-amber-400"></textarea>
+                                <div class="flex gap-2">
+                                  <input x-model.number="correctionAmount" type="number" step="0.01" placeholder="Betrag (negativ = Abzug)"
+                                    class="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400">
+                                  <button @click="saveCorrection(inv)" :disabled="correctionSaving || !correctionText.trim() || correctionAmount === ''"
+                                    class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 disabled:opacity-40">
+                                    <span x-text="correctionSaving ? 'Lädt…' : 'Speichern'"></span>
+                                  </button>
+                                  <button @click="correctionEditing=false" class="px-2 py-1 bg-gray-100 rounded text-xs">Abbrechen</button>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+
+                      <!-- Actions -->
+                      <div class="flex gap-2 pt-1" x-show="user?.roles?.some(r => ['labmanager','admin'].includes(r))">
+                        <button @click="downloadPdf(inv)" class="text-xs text-blue-500 hover:underline">🖨️ PDF</button>
+                        <button x-show="!inv.paymode" @click="openPayInvoice(inv)"
+                                class="text-xs text-green-600 hover:underline font-medium">Bezahlen</button>
+                        <button x-show="!inv.paymode" @click="cancelInvoice(inv)"
+                                class="text-xs text-red-500 hover:underline">Stornieren</button>
+                        <button x-show="inv.paymode && isAdmin" @click="unPayInvoice(inv)"
+                                class="text-xs text-orange-500 hover:underline"
+                                title="Bezahlung rückgängig – Webling-Buchung manuell löschen!">Bezahlung löschen</button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Tab: Upgrade -->
+          <div x-show="memberTab === 'upgrade'" class="text-sm space-y-4">
+            <div x-show="!memberUpgrade" class="text-gray-400">Kein aktives Upgrade.</div>
+            <div x-show="memberUpgrade">
+              <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <p class="font-semibold text-purple-800" x-text="memberUpgrade?.upgrade_type"></p>
+                <p class="text-xs text-purple-500 mt-1">
+                  <span x-text="'ab ' + fmtDate(memberUpgrade?.start_date)"></span>
+                  <span x-show="memberUpgrade?.expiry_date"
+                        x-text="' bis ' + fmtDate(memberUpgrade?.expiry_date)"></span>
+                </p>
+              </div>
+            </div>
+            <div x-show="memberUpgradeHistory.length > 0">
+              <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Verlauf</h4>
+              <div class="space-y-1">
+                <template x-for="h in memberUpgradeHistory" :key="h.created_at + h.event_type">
+                  <div class="text-xs text-gray-500 flex gap-3">
+                    <span x-text="fmtDate(h.created_at)"></span>
+                    <span class="capitalize" x-text="h.event_type"></span>
+                    <span x-text="h.upgrade_type || ''"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /selectedMember -->
+      </div><!-- /detail panel -->
+    </div><!-- /members view -->
+
+    <!-- ══ Assignments ═══════════════════════════════════════════════════════ -->
+    <div x-show="view === 'assignments'" class="p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-xl font-bold text-gray-800">Einsatzplanung</h2>
+        <div class="flex gap-2">
+          <button x-show="isPrivileged" @click="generateModal = true"
+            class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition-colors">
+            Auto-Generieren
+          </button>
+          <button x-show="isPrivileged" @click="openNewAssignment"
+            class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors">
+            + Einsatz
+          </button>
+        </div>
+      </div>
+
+      <div class="flex gap-3 items-center mb-5">
+        <input type="date" x-model="assignmentsFrom" @change="loadAssignments"
+          class="border rounded-lg px-3 py-1.5 text-sm bg-white">
+        <span class="text-gray-400">–</span>
+        <input type="date" x-model="assignmentsTo" @change="loadAssignments"
+          class="border rounded-lg px-3 py-1.5 text-sm bg-white">
+        <button @click="loadAssignments"
+          class="px-3 py-1.5 bg-white border rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+          Laden
+        </button>
+      </div>
+
+      <div x-show="assignmentsLoading" class="text-gray-400 text-sm">Lädt…</div>
+      <div x-show="!assignmentsLoading && assignments.length === 0"
+           class="text-center text-gray-300 py-16 text-sm">
+        Keine Einsätze im gewählten Zeitraum.
+      </div>
+
+      <div class="space-y-3">
+        <template x-for="a in assignments" :key="a.id">
+          <div class="bg-white rounded-xl border p-4 flex items-start justify-between">
+            <div>
+              <div class="flex items-center gap-3 mb-1">
+                <span class="font-semibold text-gray-800 text-sm" x-text="fmtDate(a.date)"></span>
+                <span class="text-xs text-gray-400"
+                      x-text="fmtTime(a.start_time) + ' – ' + fmtTime(a.end_time)"></span>
+                <span class="text-xs px-2 py-0.5 rounded-full"
+                  :class="a.status==='scheduled' ? 'bg-yellow-100 text-yellow-700' : a.status==='confirmed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'"
+                  x-text="a.status"></span>
+              </div>
+              <p class="text-sm text-gray-700">
+                <span class="font-medium" x-text="a.user_name"></span>
+                <span class="text-gray-400 text-xs ml-2" x-text="a.user_email"></span>
+              </p>
+            </div>
+            <div class="flex gap-3 text-xs ml-4 flex-shrink-0" x-show="isPrivileged">
+              <button @click="openEditAssignment(a)" class="text-blue-500 hover:underline">Bearbeiten</button>
+              <button x-show="a.status !== 'cancelled'" @click="requestSubstitutePrompt(a)"
+                class="text-orange-500 hover:underline">Vertretung</button>
+              <button x-show="a.status !== 'cancelled'" @click="deleteAssignmentPrompt(a)"
+                class="text-red-500 hover:underline">Absagen</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ══ Balance ════════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'balance'" class="p-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-5">Guthaben</h2>
+      <div class="max-w-md space-y-4">
+        <div class="bg-white rounded-xl border p-4">
+          <label class="block text-xs font-medium text-gray-600 mb-2">Mitglied suchen</label>
+          <div class="flex gap-2">
+            <input x-model="balanceMemberSearch" type="text" placeholder="Name oder E-Mail"
+              @keyup.enter="balanceSearchMember"
+              class="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button @click="balanceSearchMember"
+              class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">Suchen</button>
+          </div>
+          <div x-show="balanceCandidates.length > 0"
+               class="border rounded-lg mt-2 bg-white shadow-sm divide-y overflow-hidden">
+            <template x-for="m in balanceCandidates" :key="m.id">
+              <button @click="selectBalanceMember(m)"
+                class="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm">
+                <span x-text="m.name"></span>
+                <span class="text-gray-400 text-xs ml-2" x-text="m.email"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div x-show="balanceSelectedMember" class="bg-white rounded-xl border p-4">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <p class="font-semibold text-gray-800 text-sm" x-text="balanceSelectedMember?.name"></p>
+              <p class="text-xs text-gray-400" x-text="balanceSelectedMember?.email"></p>
+            </div>
+            <div class="text-right">
+              <p class="text-xs text-gray-400">Guthaben</p>
+              <p class="text-xl font-bold"
+                 :class="(currentBalance||0) >= 0 ? 'text-green-600' : 'text-red-600'">
+                CHF <span x-text="currentBalance !== null ? Number(currentBalance).toFixed(2) : '…'"></span>
+              </p>
+            </div>
+          </div>
+          <div class="border-t pt-4 space-y-3">
+            <div class="flex gap-2">
+              <button @click="balanceAction = 'deposit'"
+                :class="balanceAction==='deposit' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'"
+                class="flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors">Einzahlen</button>
+              <button @click="balanceAction = 'withdraw'"
+                :class="balanceAction==='withdraw' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'"
+                class="flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors">Abheben</button>
+            </div>
+            <input x-model="balanceAmount" type="number" min="0.01" step="0.01" placeholder="Betrag (CHF)"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button @click="submitBalance"
+              :class="balanceAction==='deposit' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
+              class="w-full py-2 text-white rounded-lg text-sm font-medium transition-colors">
+              <span x-text="balanceAction === 'deposit' ? 'Einzahlen' : 'Abheben'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ My Account ════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'my-account'" class="p-4 space-y-4 max-w-2xl">
+
+      <div x-show="myAccountLoading" class="text-gray-400 text-sm">Lädt…</div>
+
+      <div x-show="!myAccountLoading" class="space-y-4">
+
+        <!-- Guthaben -->
+        <div class="bg-white rounded-xl border p-4 flex items-center justify-between">
+          <span class="text-sm text-gray-600">Mein Guthaben</span>
+          <span class="text-2xl font-bold"
+                :class="myBalance !== null && myBalance < 0 ? 'text-red-600' : 'text-gray-800'"
+                x-text="myBalance !== null ? 'CHF ' + myBalance.toFixed(2) : '–'"></span>
+        </div>
+
+        <!-- Aktive Nutzung -->
+        <div x-show="myActiveSessions.length > 0" class="bg-white rounded-xl border p-4 space-y-2">
+          <h3 class="text-sm font-semibold text-gray-700">Aktive Nutzung</h3>
+          <template x-for="s in myActiveSessions" :key="s.id">
+            <div class="flex items-center justify-between text-sm border-b last:border-0 py-1.5">
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                <span class="font-medium" x-text="s.machine_name"></span>
+              </div>
+              <span class="text-gray-500 tabular-nums font-mono text-xs"
+                    x-text="fmtDuration(Math.max(0, Math.floor((_now - new Date(s.session_start.replace(' ','T')).getTime()) / 1000)))"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Aufgelaufene Kosten (abgeschlossene Sessions, noch nicht verrechnet) -->
+        <div x-show="myPreview.length > 0" class="bg-white rounded-xl border p-4 space-y-2">
+          <h3 class="text-sm font-semibold text-gray-700">Aufgelaufene Kosten</h3>
+          <table class="w-full text-xs">
+            <thead><tr class="text-gray-400 border-b">
+              <th class="text-left pb-1">Maschine</th>
+              <th class="text-right pb-1">Laufzeit</th>
+              <th class="text-right pb-1">Betrag</th>
+            </tr></thead>
+            <tbody>
+              <template x-for="(line, i) in myPreview" :key="i">
+                <tr class="border-b last:border-0">
+                  <td class="py-1 text-gray-700" x-text="line.machine_name"></td>
+                  <td class="py-1 text-right text-gray-500 tabular-nums" x-text="fmtDuration(line.usageSeconds)"></td>
+                  <td class="py-1 text-right font-medium tabular-nums" x-text="Number(line.price).toFixed(2)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div class="flex justify-between text-sm font-semibold border-t pt-1.5">
+            <span>Total offen</span>
+            <span class="tabular-nums" x-text="'CHF ' + Number(myPreviewTotal).toFixed(2)"></span>
+          </div>
+        </div>
+
+        <!-- Artikel bestellen (Getränke, Material) -->
+        <div x-show="myArticles.length > 0" class="bg-white rounded-xl border p-4 space-y-3">
+          <h3 class="text-sm font-semibold text-gray-700">Artikel bestellen</h3>
+
+          <!-- Auswahl -->
+          <div class="flex gap-2">
+            <select x-model="myCartArticleId"
+              @change="myCartQty = 1"
+              class="flex-1 border rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+              <option value="">— Artikel wählen —</option>
+              <template x-for="a in myArticles" :key="a.id">
+                <option :value="a.id" x-text="a.name + ' (CHF ' + Number(a.price).toFixed(2) + ')'"></option>
+              </template>
+            </select>
+            <input x-model.number="myCartQty" type="number" min="1" step="1"
+              @keyup.enter="myAddToCart()"
+              class="w-16 border rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-400">
+            <button @click="myAddToCart()" :disabled="!myCartArticleId"
+              class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-40">+</button>
+          </div>
+
+          <!-- Warenkorb -->
+          <template x-if="myCart.length > 0">
+            <div class="space-y-1.5">
+              <template x-for="(item, idx) in myCart" :key="idx">
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-gray-700" x-text="item.qty + '× ' + item.description"></span>
+                  <div class="flex items-center gap-2">
+                    <span class="tabular-nums text-gray-600" x-text="'CHF ' + (item.qty * item.unit_price).toFixed(2)"></span>
+                    <button @click="myCart.splice(idx,1)" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+                  </div>
+                </div>
+              </template>
+              <div class="flex items-center justify-between font-semibold text-sm border-t pt-1.5">
+                <span>Total</span>
+                <span class="tabular-nums" x-text="'CHF ' + myCart.reduce((s,i) => s + i.qty*i.unit_price, 0).toFixed(2)"></span>
+              </div>
+
+              <!-- Zur Rechnung hinzufügen -->
+              <div class="pt-1">
+                <template x-if="myInvoices.find(i => !i.paymode)">
+                  <button @click="mySubmitOrder()" :disabled="myOrderSaving"
+                    class="w-full py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                    <span x-text="myOrderSaving ? 'Lädt…' : 'Zur offenen Rechnung hinzufügen'"></span>
+                  </button>
+                </template>
+                <template x-if="!myInvoices.find(i => !i.paymode)">
+                  <p class="text-xs text-gray-400 text-center py-1">Noch keine offene Rechnung — Labmanager erstellt diese.</p>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Rechnungen (offen + bezahlt, klickbar für Detail) -->
+        <div x-show="myInvoices.length > 0" class="bg-white rounded-xl border overflow-hidden">
+          <h3 class="text-sm font-semibold text-gray-700 px-4 pt-3 pb-2">Rechnungen</h3>
+          <template x-for="inv in myInvoices" :key="inv.id">
+            <div class="border-t">
+              <!-- Klickbare Kopfzeile -->
+              <div class="px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                   @click="toggleInvoiceDetail(inv)">
+                <div>
+                  <p class="text-sm font-medium" x-text="'Rechnung #' + inv.id"></p>
+                  <p class="text-xs text-gray-400"
+                     x-text="fmtDate(inv.created_at) + ' · ' + (inv.paymode || 'Offen')"></p>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span x-show="!inv.paymode"
+                        class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Offen</span>
+                  <span class="text-sm font-semibold tabular-nums"
+                        x-text="'CHF ' + Number(inv.total).toFixed(2)"></span>
+                  <span class="text-gray-400 text-xs" x-text="invoiceDetailId === inv.id ? '▲' : '▼'"></span>
+                </div>
+              </div>
+
+              <!-- Detail-Panel (wiederverwendet aus Labmanager-Logik) -->
+              <div x-show="invoiceDetailId === inv.id" class="border-t bg-gray-50 px-4 pb-3 pt-2 space-y-2">
+                <div x-show="invoiceDetailLoading" class="text-xs text-gray-400">Lade…</div>
+                <template x-if="!invoiceDetailLoading && invoiceDetail">
+                  <div class="space-y-2">
+                    <!-- Maschinenzeit -->
+                    <template x-if="invoiceDetail.machine_lines && invoiceDetail.machine_lines.length > 0">
+                      <div>
+                        <p class="text-xs text-gray-400 mb-1">Maschinenzeit</p>
+                        <table class="w-full text-xs">
+                          <thead><tr class="text-gray-400 border-b">
+                            <th class="text-left pb-0.5 font-medium">Maschine</th>
+                            <th class="text-left pb-0.5 font-medium pl-2">Start</th>
+                            <th class="text-right pb-0.5 font-medium pl-2">Laufzeit</th>
+                            <th class="text-right pb-0.5 font-medium pl-2">Betrag</th>
+                          </tr></thead>
+                          <tbody>
+                            <template x-for="(line, i) in invoiceDetail.machine_lines" :key="i">
+                              <tr class="border-b border-gray-100">
+                                <td class="py-0.5 text-gray-700" x-text="line.machine_name"></td>
+                                <td class="py-0.5 pl-2 text-gray-500 whitespace-nowrap" x-text="fmtRoundedDateTime(line.startIso)"></td>
+                                <td class="py-0.5 pl-2 text-right text-gray-600 whitespace-nowrap" x-text="fmtDuration(line.usageSeconds)"></td>
+                                <td class="py-0.5 pl-2 text-right font-medium tabular-nums" x-text="Number(line.price).toFixed(2)"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                    <!-- Artikel -->
+                    <template x-if="invoiceDetail.items && invoiceDetail.items.length > 0">
+                      <div>
+                        <p class="text-xs text-gray-400 mb-1">Artikel</p>
+                        <table class="w-full text-xs">
+                          <thead><tr class="text-gray-400 border-b">
+                            <th class="text-left pb-0.5 font-medium">Artikel</th>
+                            <th class="text-right pb-0.5 font-medium pl-2">Stk.</th>
+                            <th class="text-right pb-0.5 font-medium pl-2">Einzel</th>
+                            <th class="text-right pb-0.5 font-medium pl-2">Betrag</th>
+                          </tr></thead>
+                          <tbody>
+                            <template x-for="(item, i) in invoiceDetail.items" :key="item.id || i">
+                              <tr class="border-b border-gray-100" :class="item.is_correction ? 'bg-amber-50' : ''">
+                                <td class="py-0.5 text-gray-700 whitespace-pre-wrap" x-text="item.description"></td>
+                                <td class="py-0.5 pl-2 text-right tabular-nums" x-text="item.is_correction ? '' : Number(item.quantity)"></td>
+                                <td class="py-0.5 pl-2 text-right tabular-nums text-gray-500" x-text="item.is_correction ? '' : Number(item.unit_price).toFixed(2)"></td>
+                                <td class="py-0.5 pl-2 text-right font-medium tabular-nums"
+                                    :class="Number(item.total) < 0 ? 'text-red-600' : ''"
+                                    x-text="Number(item.total).toFixed(2)"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                    <!-- Total + Labmanager + PDF -->
+                    <div class="flex items-center justify-between pt-1">
+                      <div>
+                        <span class="text-sm font-semibold">Total CHF <span x-text="Number(invoiceDetail.invoice.total).toFixed(2)"></span></span>
+                        <p x-show="invoiceDetail.invoice.created_by_name" class="text-xs text-gray-400 mt-0.5">
+                          Ausgestellt von <span x-text="invoiceDetail.invoice.created_by_name"></span>
+                        </p>
+                      </div>
+                      <button @click="downloadPdf(inv)" class="text-xs text-blue-500 hover:underline">🖨 PDF</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div x-show="myActiveSessions.length === 0 && myPreview.length === 0 && myInvoices.length === 0"
+             class="text-gray-400 text-sm text-center py-8">Keine Aktivitäten vorhanden.</div>
+
+      </div>
+    </div>
+
+    <!-- ══ Machine Status ═════════════════════════════════════════════════════ -->
+    <div x-show="view === 'machine-status'" class="p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold text-gray-800">Maschinenbelegung</h2>
+        <span class="text-xs text-gray-400">Aktualisierung alle 15 s</span>
+      </div>
+
+      <div x-show="machineStatus.length === 0" class="text-gray-400 text-sm">Lädt…</div>
+
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <template x-for="m in machineStatus" :key="m.id">
+          <div class="bg-white rounded-xl border p-4 flex flex-col gap-2"
+               :class="m.in_use ? 'border-green-300 shadow-sm' : 'border-gray-200'">
+
+            <!-- Maschinennamen + Status-Dot -->
+            <div class="flex items-start justify-between gap-1">
+              <span class="font-semibold text-sm text-gray-800 leading-tight" x-text="m.name"></span>
+              <span class="mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0"
+                    :class="m.in_use ? 'bg-green-500' : 'bg-gray-300'"></span>
+            </div>
+
+            <!-- Belegt -->
+            <template x-if="m.in_use">
+              <div class="space-y-0.5">
+                <p class="text-sm font-medium text-green-700" x-text="m.user_name || '–'"></p>
+                <p class="text-xs text-gray-500 tabular-nums"
+                   x-text="machineElapsed(m) != null ? fmtDuration(machineElapsed(m)) : ''"></p>
+              </div>
+            </template>
+
+            <!-- Frei -->
+            <template x-if="!m.in_use">
+              <p class="text-sm text-gray-400">Frei</p>
+            </template>
+
+            <!-- Heartbeat -->
+            <p class="text-xs text-gray-300 mt-auto"
+               x-text="heartbeatAgo(m) ? '● ' + heartbeatAgo(m) : ''"
+               :title="m.last_heartbeat ? 'Letzter Heartbeat: ' + m.last_heartbeat : 'Kein Heartbeat'"></p>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ══ Settings ═══════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'settings'" class="p-6 space-y-4">
+      <h2 class="text-xl font-bold text-gray-800">Einstellungen</h2>
+
+      <!-- Maschinen (labmanager+) -->
+      <div class="bg-white rounded-xl border p-4 max-w-3xl">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-gray-800 text-sm">Maschinen</h3>
+          <button @click="openNewMachine()"
+            class="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700">+ Neu</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead class="text-gray-400 border-b">
+              <tr>
+                <th class="text-left pb-2 font-medium pr-3">Name</th>
+                <th class="text-right pb-2 font-medium pr-3">Preis (CHF)</th>
+                <th class="text-right pb-2 font-medium pr-3">Periode (Min.)</th>
+                <th class="text-right pb-2 font-medium pr-3">Min. Perioden</th>
+                <th class="text-right pb-2 font-medium pr-3">Min. Preis</th>
+                <th class="text-left pb-2 font-medium pr-3">Konto</th>
+                <th class="text-center pb-2 font-medium pr-3">Status</th>
+                <th class="pb-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="m in allMachines" :key="m.id">
+                <tr class="border-b last:border-0" :class="!m.active ? 'opacity-40' : ''">
+                  <td class="py-1.5 pr-3 font-medium" x-text="m.name"></td>
+                  <td class="py-1.5 pr-3 text-right" x-text="Number(m.price).toFixed(2)"></td>
+                  <td class="py-1.5 pr-3 text-right" x-text="m.period"></td>
+                  <td class="py-1.5 pr-3 text-right" x-text="m.min_periods"></td>
+                  <td class="py-1.5 pr-3 text-right" x-text="m.min_price ? Number(m.min_price).toFixed(2) : '–'"></td>
+                  <td class="py-1.5 pr-3"
+                      :class="m.konto_nr ? 'text-gray-500' : 'text-amber-600 font-medium'"
+                      x-text="m.konto_nr || '⚠ fehlt'"></td>
+                  <td class="py-1.5 pr-3 text-center">
+                    <span :class="m.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
+                      class="px-2 py-0.5 rounded-full text-xs" x-text="m.active ? 'Aktiv' : 'Inaktiv'"></span>
+                  </td>
+                  <td class="py-1.5 text-right whitespace-nowrap">
+                    <button @click="openEditMachine(m)" class="text-blue-500 hover:underline mr-2">Bearbeiten</button>
+                    <button @click="toggleMachineActive(m)"
+                      class="hover:underline"
+                      :class="m.active ? 'text-red-400' : 'text-green-500'"
+                      x-text="m.active ? 'Deaktivieren' : 'Aktivieren'"></button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Artikel -->
+      <div class="bg-white rounded-xl border p-4 max-w-3xl">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-gray-800 text-sm">Artikel</h3>
+          <button @click="openNewArticle()"
+            class="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700">+ Neu</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead class="text-gray-400 border-b">
+              <tr>
+                <th class="text-left pb-2 font-medium pr-3">Name</th>
+                <th class="text-right pb-2 font-medium pr-3">Preis (CHF)</th>
+                <th class="text-left pb-2 font-medium pr-3">Konto</th>
+                <th class="text-center pb-2 font-medium pr-3">Typ</th>
+                <th class="text-center pb-2 font-medium pr-3">Status</th>
+                <th class="pb-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="a in allArticlesManage" :key="a.id">
+                <tr class="border-b last:border-0" :class="!a.active ? 'opacity-40' : ''">
+                  <td class="py-1.5 pr-3 font-medium" x-text="a.name"></td>
+                  <td class="py-1.5 pr-3 text-right" x-text="a.is_balance_deposit ? '–' : Number(a.price).toFixed(2)"></td>
+                  <td class="py-1.5 pr-3"
+                      :class="(a.konto_nr || a.is_balance_deposit) ? 'text-gray-500' : 'text-amber-600 font-medium'"
+                      x-text="a.konto_nr || (a.is_balance_deposit ? '–' : '⚠ fehlt')"></td>
+                  <td class="py-1.5 pr-3 text-center">
+                    <span x-show="a.is_balance_deposit" class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Guthaben</span>
+                    <span x-show="!a.is_balance_deposit" class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Artikel</span>
+                  </td>
+                  <td class="py-1.5 pr-3 text-center">
+                    <span :class="a.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
+                      class="px-2 py-0.5 rounded-full" x-text="a.active ? 'Aktiv' : 'Inaktiv'"></span>
+                  </td>
+                  <td class="py-1.5 text-right whitespace-nowrap">
+                    <button @click="openEditArticle(a)" class="text-blue-500 hover:underline mr-2">Bearbeiten</button>
+                    <button @click="toggleArticleActive(a)"
+                      class="hover:underline"
+                      :class="a.active ? 'text-red-400' : 'text-green-500'"
+                      x-text="a.active ? 'Deaktivieren' : 'Aktivieren'"></button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Zahlungsarten (admin only) -->
+      <div x-show="isAdmin" class="bg-white rounded-xl border p-4 max-w-3xl">
+        <h3 class="font-semibold text-gray-800 mb-3 text-sm">Zahlungsarten</h3>
+        <table class="w-full text-xs">
+          <thead class="text-gray-400 border-b">
+            <tr>
+              <th class="text-left pb-2 font-medium pr-3">Name</th>
+              <th class="text-left pb-2 font-medium pr-3">Buchungskonto</th>
+              <th class="pb-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="pm in allPaymodes" :key="pm.id">
+              <tr class="border-b last:border-0">
+                <td class="py-1.5 pr-3 font-medium">
+                  <span x-text="pm.name"></span>
+                  <span x-show="!pm.konto_nr" class="ml-1 text-amber-500 text-xs">⚠</span>
+                </td>
+                <td class="py-1.5 pr-3">
+                  <input x-model="pm.konto_nr" type="text" placeholder="fehlt"
+                    :class="pm.konto_nr ? '' : 'border-amber-300 bg-amber-50'"
+                    class="border rounded px-2 py-1 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </td>
+                <td class="py-1.5 text-right">
+                  <button @click="savePaymode(pm)" class="text-blue-500 hover:underline">Speichern</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Config (admin only) -->
+      <div x-show="isAdmin" class="bg-white rounded-xl border p-4 max-w-3xl">
+        <h3 class="font-semibold text-gray-800 mb-3 text-sm">Konfiguration</h3>
+        <div class="space-y-2">
+          <template x-for="c in configEntries" :key="c.key">
+            <div class="flex items-center gap-3 text-xs border-b pb-2 last:border-0">
+              <div class="w-56 shrink-0">
+                <p class="font-mono text-gray-700" x-text="c.key"></p>
+                <p class="text-gray-400 mt-0.5" x-text="c.description || ''"></p>
+              </div>
+              <input :type="c.type === 'number' ? 'number' : 'text'"
+                x-model="c.value"
+                class="flex-1 border rounded px-2 py-1 text-xs min-w-0">
+              <button @click="saveConfig(c)"
+                class="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 shrink-0">Speichern</button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Öffnungszeiten (admin only) -->
+      <div x-show="isAdmin" class="bg-white rounded-xl border p-4 max-w-lg">
+        <h3 class="font-semibold text-gray-800 mb-3 text-sm">Öffnungszeiten (Wochenplan)</h3>
+        <div class="space-y-2">
+          <template x-for="(day, idx) in weekdays" :key="idx">
+            <div class="flex items-center gap-3 text-sm">
+              <span class="w-24 text-gray-600 text-xs" x-text="day"></span>
+              <template x-if="getSchedule(idx)">
+                <div class="flex items-center gap-2 flex-1">
+                  <input type="time" :value="getSchedule(idx)?.open_time?.slice(0,5)"
+                    @change="updateScheduleTime(idx, 'open_time', $event.target.value)"
+                    class="border rounded px-2 py-1 text-xs bg-white">
+                  <span class="text-gray-300">–</span>
+                  <input type="time" :value="getSchedule(idx)?.close_time?.slice(0,5)"
+                    @change="updateScheduleTime(idx, 'close_time', $event.target.value)"
+                    class="border rounded px-2 py-1 text-xs bg-white">
+                  <button @click="deleteScheduleDay(idx)"
+                    class="text-red-400 hover:text-red-600 text-xs ml-1">Entfernen</button>
+                </div>
+              </template>
+              <template x-if="!getSchedule(idx)">
+                <button @click="addScheduleDay(idx)"
+                  class="text-blue-500 hover:underline text-xs">+ Tag hinzufügen</button>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div x-show="isAdmin" class="bg-white rounded-xl border p-4 max-w-lg">
+        <h3 class="font-semibold text-gray-800 mb-3 text-sm">Webling Sync</h3>
+        <p class="text-xs text-gray-400 mb-3">Mitglieder aus Webling in die lokale Datenbank synchronisieren.</p>
+        <button @click="runWeblingSync" :disabled="woblingSyncing"
+          class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors">
+          <span x-text="woblingSyncing ? 'Synchronisiert…' : 'Jetzt synchronisieren'"></span>
+        </button>
+        <p x-show="woblingSyncResult" class="text-xs mt-2 text-gray-600" x-text="woblingSyncResult"></p>
+      </div>
+
+      <div x-show="isAdmin" class="bg-white rounded-xl border p-4 max-w-lg">
+        <h3 class="font-semibold text-gray-800 mb-3 text-sm">Google Kalender</h3>
+        <div class="flex items-center gap-4">
+          <span class="text-sm font-medium"
+            :class="googleAuthorised ? 'text-green-600' : 'text-red-500'"
+            x-text="googleAuthorised ? '● Verbunden' : '○ Nicht verbunden'"></span>
+          <a x-show="!googleAuthorised" href="/api/browser/google/auth" target="_blank"
+            class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700">
+            Mit Google verbinden
+          </a>
+          <button @click="loadGoogleStatus"
+            class="text-xs text-gray-400 hover:underline">Aktualisieren</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Profile ════════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'profile'" class="p-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-5">Profil</h2>
+      <div class="max-w-md space-y-4">
+
+        <div class="bg-white rounded-xl border p-4">
+          <h3 class="font-semibold text-gray-800 mb-3 text-sm">Passwort ändern</h3>
+          <form @submit.prevent="changePassword" class="space-y-2">
+            <div class="relative">
+              <input x-model="pwCurrent" :type="showPw ? 'text' : 'password'" placeholder="Aktuelles Passwort"
+                autocomplete="current-password"
+                class="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <button type="button" @click="showPw=!showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+                <span x-text="showPw ? '🙈' : '👁'"></span>
+              </button>
+            </div>
+            <input x-model="pwNew" :type="showPw ? 'text' : 'password'" placeholder="Neues Passwort (min. 8 Zeichen)"
+              autocomplete="new-password"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input x-model="pwConfirm" :type="showPw ? 'text' : 'password'" placeholder="Neues Passwort bestätigen"
+              autocomplete="new-password"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button type="submit"
+              class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+              Passwort speichern
+            </button>
+          </form>
+        </div>
+
+        <div class="bg-white rounded-xl border p-4">
+          <h3 class="font-semibold text-gray-800 mb-2 text-sm">Badge-Login</h3>
+          <p class="text-xs text-gray-400 mb-3">Ermöglicht das Anmelden per Badge ohne Passwort. Nur aktivieren wenn der Zugang zum Badge gesichert ist.</p>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <div class="relative">
+              <input type="checkbox" class="sr-only" x-model="badgeLoginEnabled" @change="toggleBadgeLogin">
+              <div class="w-10 h-6 rounded-full transition-colors" :class="badgeLoginEnabled ? 'bg-blue-600' : 'bg-gray-300'"></div>
+              <div class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform" :class="badgeLoginEnabled ? 'translate-x-4' : ''"></div>
+            </div>
+            <span class="text-sm" x-text="badgeLoginEnabled ? 'Badge-Login aktiv' : 'Badge-Login inaktiv'"></span>
+          </label>
+        </div>
+
+        <div class="bg-white rounded-xl border p-4" x-show="isLabmanager">
+          <h3 class="font-semibold text-gray-800 mb-3 text-sm">Einsatz-Präferenzen</h3>
+          <div class="space-y-3 text-sm">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Bevorzugter Wochentag</label>
+              <select x-model="prefWeekday"
+                class="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">Flexibel (kein)</option>
+                <option value="0">Montag</option>
+                <option value="1">Dienstag</option>
+                <option value="2">Mittwoch</option>
+                <option value="3">Donnerstag</option>
+                <option value="4">Freitag</option>
+                <option value="5">Samstag</option>
+                <option value="6">Sonntag</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Priorität (1 = höchste)</label>
+              <input x-model.number="prefPriority" type="number" min="1" max="10"
+                class="w-full border rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Max. Einsätze pro Monat</label>
+              <input x-model.number="prefMaxPerMonth" type="number" min="1" max="20"
+                class="w-full border rounded-lg px-3 py-2 text-sm">
+            </div>
+            <button @click="savePreferences"
+              class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+              Speichern
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+</div><!-- /app shell -->
+
+<!-- ══ Modals ════════════════════════════════════════════════════════════════ -->
+
+<!-- Confirm dialog -->
+<div x-show="confirmDialog" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <p class="text-sm text-gray-700 mb-5" x-text="confirmDialog?.msg"></p>
+    <div class="flex gap-2">
+      <button @click="confirmDialog = null"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="confirmDialog.cb(); confirmDialog = null"
+        class="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Bestätigen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Generate assignments modal -->
+<div x-show="generateModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <h3 class="font-semibold text-gray-800 mb-4">Einsätze auto-generieren</h3>
+    <div class="space-y-3 text-sm">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Von</label>
+        <input type="date" x-model="genFrom" class="w-full border rounded-lg px-3 py-2 bg-white">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Bis</label>
+        <input type="date" x-model="genTo" class="w-full border rounded-lg px-3 py-2 bg-white">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button @click="generateModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="generateAssignments"
+        class="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Generieren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Assignment edit modal -->
+<div x-show="assignmentModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
+    <h3 class="font-semibold text-gray-800 mb-4"
+        x-text="editAssignment?.id ? 'Einsatz bearbeiten' : 'Neuer Einsatz'"></h3>
+    <div class="space-y-3 text-sm">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Labmanager</label>
+        <select x-model.number="editAssignment.user_id"
+          class="w-full border rounded-lg px-3 py-2 bg-white">
+          <template x-for="lm in labmanagers" :key="lm.id">
+            <option :value="lm.id" x-text="lm.name"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Datum</label>
+        <input type="date" x-model="editAssignment.date"
+          class="w-full border rounded-lg px-3 py-2 bg-white">
+      </div>
+      <div class="flex gap-2">
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Von</label>
+          <input type="time" x-model="editAssignment.start_time"
+            class="w-full border rounded-lg px-3 py-2 bg-white">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-500 mb-1">Bis</label>
+          <input type="time" x-model="editAssignment.end_time"
+            class="w-full border rounded-lg px-3 py-2 bg-white">
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button @click="assignmentModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="saveAssignment"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pay invoice modal -->
+<div x-show="payInvoiceModal.open" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <h3 class="font-semibold text-gray-800 mb-1">Rechnung bezahlen</h3>
+    <p class="text-sm text-gray-500 mb-4">
+      Rechnung #<span x-text="payInvoiceModal.invoice?.id"></span> ·
+      CHF <span x-text="Number(payInvoiceModal.invoice?.total).toFixed(2)"></span>
+    </p>
+    <label class="block text-xs text-gray-500 mb-1">Zahlungsart</label>
+    <select x-model.number="payInvoiceModal.paymodeId"
+      class="w-full border rounded-lg px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option :value="null">— wählen —</option>
+      <template x-for="pm in invoicePaymodes" :key="pm.id">
+        <option :value="pm.id" x-text="pm.name"></option>
+      </template>
+    </select>
+    <div class="flex gap-2">
+      <button @click="payInvoiceModal.open = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="confirmPayInvoice()"
+        :disabled="!payInvoiceModal.paymodeId"
+        class="flex-1 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-40">
+        Bezahlen
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Invoice preview modal -->
+<div x-show="invoiceModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-[28rem] max-h-[90vh] overflow-y-auto">
+    <h3 class="font-semibold text-gray-800 mb-4">
+      Rechnung für <span x-text="selectedMember?.name"></span>
+    </h3>
+    <div x-show="invoiceLoading" class="text-gray-400 text-sm py-4 text-center">Lädt…</div>
+
+    <div x-show="!invoiceLoading" class="space-y-4">
+
+      <!-- Maschinenzeit-Positionen -->
+      <div x-show="invoiceLines.length > 0">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Maschinenzeit</p>
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-gray-400 border-b">
+              <th class="text-left pb-1 font-medium">Maschine</th>
+              <th class="text-left pb-1 font-medium pl-2">Start</th>
+              <th class="text-right pb-1 font-medium pl-2">Laufzeit</th>
+              <th class="text-right pb-1 font-medium pl-2">Betrag</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(line, i) in invoiceLines" :key="i">
+              <tr class="border-b border-gray-100">
+                <td class="py-1 text-gray-700" x-text="line.machine_name"></td>
+                <td class="py-1 pl-2 text-gray-500 whitespace-nowrap" x-text="fmtRoundedDateTime(line.startIso)"></td>
+                <td class="py-1 pl-2 text-right text-gray-600 whitespace-nowrap" x-text="fmtDuration(line.usageSeconds)"></td>
+                <td class="py-1 pl-2 text-right font-medium tabular-nums" x-text="Number(line.price).toFixed(2)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Artikel-Positionen -->
+      <div x-show="invoiceItems.length > 0">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Artikel</p>
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-gray-400 border-b">
+              <th class="text-left pb-1 font-medium">Artikel</th>
+              <th class="text-right pb-1 font-medium pl-2">Stk.</th>
+              <th class="text-right pb-1 font-medium pl-2">Einzelpr.</th>
+              <th class="text-right pb-1 font-medium pl-2">Betrag</th>
+              <th class="pb-1 w-5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(item, idx) in invoiceItems" :key="idx">
+              <tr class="border-b border-gray-100">
+                <td class="py-1 text-gray-700" x-text="item.description"></td>
+                <template x-if="!item.is_balance_deposit">
+                  <td class="py-1 pl-2 text-right tabular-nums" x-text="item.qty"></td>
+                </template>
+                <template x-if="item.is_balance_deposit">
+                  <td class="py-1 pl-2 text-right text-gray-400">–</td>
+                </template>
+                <template x-if="!item.is_balance_deposit">
+                  <td class="py-1 pl-2 text-right tabular-nums text-gray-500" x-text="Number(item.unit_price).toFixed(2)"></td>
+                </template>
+                <template x-if="item.is_balance_deposit">
+                  <td class="py-1 pl-2 text-right text-gray-400">–</td>
+                </template>
+                <td class="py-1 pl-2 text-right font-medium tabular-nums" x-text="(item.qty * item.unit_price).toFixed(2)"></td>
+                <td class="py-1 pl-1">
+                  <button @click="removeInvoiceItem(idx)" class="text-red-400 hover:text-red-600">✕</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Webling-Buchungs-Warnungen -->
+      <template x-if="invoiceMissingKontoWarnings().length > 0">
+        <div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 space-y-0.5">
+          <p class="font-medium">⚠ Webling-Buchung unvollständig — kein Konto konfiguriert für:</p>
+          <template x-for="w in invoiceMissingKontoWarnings()" :key="w">
+            <p class="pl-2" x-text="'· ' + w"></p>
+          </template>
+        </div>
+      </template>
+
+      <!-- Total -->
+      <div x-show="invoiceLines.length > 0 || invoiceItems.length > 0"
+           class="border-t pt-2 flex justify-between font-semibold text-sm">
+        <span>Total CHF</span>
+        <span class="tabular-nums" x-text="invoiceGrandTotal.toFixed(2)"></span>
+      </div>
+
+      <div x-show="invoiceLines.length === 0 && invoiceItems.length === 0"
+           class="text-gray-400 text-sm text-center py-2">Keine offenen Posten.</div>
+
+      <!-- Artikel hinzufügen -->
+      <div x-show="invoiceArticles.length > 0" class="border-t pt-3">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Artikel hinzufügen</p>
+        <select x-model="invoiceNewItem.article_id" @change="autoAddFixedArticle()"
+          class="w-full border rounded-lg px-2 py-1.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">— Artikel wählen —</option>
+          <template x-for="a in invoiceArticles" :key="a.id">
+            <option :value="a.id" :title="a.description || ''" x-text="a.name + (a.description ? ' – ' + a.description : '')"></option>
+          </template>
+        </select>
+
+        <template x-if="invoiceSelectedArticle()">
+          <div class="space-y-2">
+            <!-- Menge (nicht bei Guthaben) -->
+            <div x-show="!invoiceSelectedArticle()?.is_balance_deposit" class="flex gap-2 items-center">
+              <label class="text-xs text-gray-500 w-16">Anzahl</label>
+              <input x-model.number="invoiceNewItem.qty" type="number" min="1" step="1"
+                @keyup.enter="addInvoiceItem"
+                class="flex-1 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <!-- Preis (fix bei normalen Artikeln, editierbar bei Guthaben) -->
+            <div class="flex gap-2 items-center">
+              <label class="text-xs text-gray-500 w-16" x-text="invoiceSelectedArticle()?.is_balance_deposit ? 'Betrag CHF' : 'Preis CHF'"></label>
+              <input x-model.number="invoiceNewItem.unit_price" type="number" min="0" step="0.01"
+                :readonly="!invoiceSelectedArticle()?.is_balance_deposit && invoiceSelectedArticle()?.price > 0"
+                :class="(!invoiceSelectedArticle()?.is_balance_deposit && invoiceSelectedArticle()?.price > 0) ? 'bg-gray-50' : ''"
+                class="flex-1 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                x-effect="if(invoiceSelectedArticle() && !invoiceSelectedArticle().is_balance_deposit) invoiceNewItem.unit_price = parseFloat(invoiceSelectedArticle().price) || 0">
+            </div>
+            <!-- Konto: automatisch aus Artikel konto_nr -->
+            <div x-show="invoiceSelectedArticle()?.is_balance_deposit" class="flex gap-2 items-center">
+              <label class="text-xs text-gray-500 w-16">Konto</label>
+              <span class="text-sm text-gray-600 tabular-nums"
+                    x-text="invoiceSelectedArticle()?.konto_nr || '⚠ Kein Konto im Artikel'"></span>
+            </div>
+            <button @click="addInvoiceItem"
+              class="w-full py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">
+              + Hinzufügen
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <!-- Zahlungsart-Warnung wenn konto_nr fehlt -->
+      <template x-if="invoicePaymodeId && invoiceSelectedPaymode() && !invoiceSelectedPaymode().konto_nr">
+        <div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          ⚠ Zahlungsart «<span x-text="invoiceSelectedPaymode().name"></span>» hat kein Buchungskonto — Webling-Buchung wird übersprungen.
+        </div>
+      </template>
+
+      <!-- Zahlungsart -->
+      <div x-show="invoicePaymodes.length > 0" class="border-t pt-3">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Zahlungsart</p>
+        <select x-model.number="invoicePaymodeId"
+          class="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option :value="null">— Offen / nicht gesetzt —</option>
+          <template x-for="pm in invoicePaymodes.filter(p => !p.name.toLowerCase().includes('guthaben'))" :key="pm.id">
+            <option :value="pm.id" x-text="pm.name"></option>
+          </template>
+        </select>
+      </div>
+
+    </div><!-- /!invoiceLoading -->
+
+    <div class="flex gap-2 mt-5">
+      <button @click="invoiceModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Schliessen</button>
+      <button x-show="invoiceLines.length > 0 || invoiceItems.length > 0" @click="createInvoice"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+        Rechnung erstellen
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Artikel modal -->
+<div x-show="articleModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <h3 class="font-semibold text-gray-800 mb-4" x-text="editingArticle ? 'Artikel bearbeiten' : 'Neuer Artikel'"></h3>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Name</label>
+        <input x-model="articleForm.name" type="text"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Beschreibung</label>
+        <textarea x-model="articleForm.description" rows="2"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+      </div>
+      <div x-show="!articleForm.is_balance_deposit">
+        <label class="block text-xs text-gray-500 mb-1">Preis (CHF)</label>
+        <input x-model.number="articleForm.price" type="number" min="0" step="0.01"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Buchungskonto (optional)</label>
+        <input x-model="articleForm.konto_nr" type="text" placeholder="z.B. 3200"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <label class="flex items-center gap-2 text-sm cursor-pointer">
+        <input type="checkbox" x-model="articleForm.is_balance_deposit" class="rounded">
+        <span class="text-gray-700">Guthaben-Einzahlung (Preis wird bei Rechnung eingegeben)</span>
+      </label>
+    </div>
+    <div class="flex gap-2 mt-5">
+      <button @click="articleModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="saveArticle()"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tag replace modal -->
+<div x-show="replaceTagModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <h3 class="font-semibold text-gray-800 mb-1">Badge ersetzen</h3>
+    <p class="text-xs text-gray-400 mb-3">
+      Alter Badge: <span class="font-mono" x-text="replaceTagTarget?.id"></span>
+    </p>
+    <input x-model="newReplacementTagId" type="text" placeholder="Neue Badge-ID (NFC-UID)"
+      @keyup.enter="replaceTag"
+      class="w-full border rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <div class="flex gap-2">
+      <button @click="replaceTagModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="replaceTag"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Ersetzen</button>
+    </div>
+  </div>
+</div>
+
+<!-- New member modal -->
+<div x-show="machineModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
+    <h3 class="font-semibold text-gray-800 mb-4" x-text="editingMachine ? 'Maschine bearbeiten' : 'Neue Maschine'"></h3>
+    <div class="space-y-3 text-sm">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Name</label>
+        <input x-model="machineForm.name" type="text" placeholder="z.B. Lasercutter"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Preis (CHF / Periode)</label>
+          <input x-model="machineForm.price" type="number" step="0.05" min="0" placeholder="1.00"
+            class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Periode (Minuten)</label>
+          <input x-model="machineForm.period" type="number" min="1" placeholder="15"
+            class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Min. Perioden</label>
+          <input x-model="machineForm.min_periods" type="number" min="1" placeholder="1"
+            class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Min. Preis (CHF, optional)</label>
+          <input x-model="machineForm.min_price" type="number" step="0.05" min="0" placeholder="–"
+            class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Buchungskonto (optional)</label>
+        <input x-model="machineForm.konto_nr" type="text" placeholder="z.B. 3400"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5">
+      <button @click="machineModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="saveMachine()"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Speichern</button>
+    </div>
+  </div>
+</div>
+
+
+<div x-show="newKnowledgeModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <h3 class="font-semibold text-gray-800 mb-4">Neuer Skill</h3>
+    <input x-model="newKnowledgeName" @keydown.enter="createKnowledge()" type="text" placeholder="Name des Skills"
+      class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4">
+    <div class="flex gap-2">
+      <button @click="newKnowledgeModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="createKnowledge()"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Anlegen</button>
+    </div>
+  </div>
+</div>
+
+<div x-show="newMemberModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
+    <h3 class="font-semibold text-gray-800 mb-4">Neues Mitglied</h3>
+    <div class="space-y-3 text-sm">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Name</label>
+        <input x-model="newMember.name" type="text" placeholder="Vorname Nachname"
+          class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">E-Mail</label>
+        <input x-model="newMember.email" type="email" placeholder="name@example.com"
+          class="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Passwort (min. 8 Zeichen)</label>
+        <div class="relative">
+          <input x-model="newMember.password" :type="showPw ? 'text' : 'password'"
+            class="w-full border rounded-lg px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <button type="button" @click="showPw=!showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+            <span x-text="showPw ? '🙈' : '👁'"></span>
+          </button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-2">Rollen</label>
+        <div class="flex gap-3">
+          <template x-for="r in ['member','labmanager','admin']" :key="r">
+            <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input type="checkbox" :value="r" x-model="newMember.roles" class="rounded">
+              <span x-text="r"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5">
+      <button @click="newMemberModal = false"
+        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+      <button @click="createMember"
+        class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Erstellen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function app() {
+  return {
+    // ── Auth ─────────────────────────────────────────────────────────────────
+    token: localStorage.getItem('flw_token') || null,
+    user:  JSON.parse(localStorage.getItem('flw_user') || 'null'),
+    showPw: false,
+    loginView: 'login',       // 'login' | 'reset-request' | 'reset-confirm'
+    loginEmail: '',
+    loginPassword: '',
+    loginError: '',
+    badgeNeedsPassword: false,
+    loginLoading: false,
+    resetMsg: '',
+    resetPassword: '',
+    resetPassword2: '',
+    resetToken: new URLSearchParams(location.search).get('reset') || '',
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+    view: 'members',
+
+    // ── Toast ─────────────────────────────────────────────────────────────────
+    toast: null,
+    _toastTimer: null,
+
+    // ── Auto-Logout ───────────────────────────────────────────────────────────
+    _autoLogoutTimer: null,
+
+    // ── Members ───────────────────────────────────────────────────────────────
+    members: [],
+    membersSearch: '',
+    membersActive: '1',
+    membersRole: '',
+    membersLoading: false,
+    selectedMember: null,
+    memberTab: 'info',
+    allKnowledge: [],
+    knowledgeToAdd: '',
+    newKnowledgeModal: false,
+    newKnowledgeName: '',
+    allMachines: [],
+    allArticlesManage: [],
+    allPaymodes: [],
+    articleModal: false,
+    editingArticle: null,
+    articleForm: { name: '', description: '', price: 0, konto_nr: '', is_balance_deposit: false },
+    addRightModal: false,
+    addRight: { tag_id: '', machine_id: '', valid_from: '', valid_to: '' },
+    rightDefaultDays: 365,
+    _rightDefaultDaysLoaded: false,
+    rightsActiveTagId: null,
+    machineModal: false,
+    editingMachine: null,
+    machineForm: { name: '', period: 60, min_periods: 1, min_price: '', price: '', konto_nr: '' },
+    configEntries: [],
+    memberTabs: [
+      { id: 'info',     label: 'Info' },
+      { id: 'balance',  label: 'Guthaben' },
+      { id: 'rights',   label: 'Rechte' },
+      { id: 'tags',     label: 'Badges' },
+      { id: 'logs',     label: 'Logs' },
+      { id: 'invoices', label: 'Rechnungen' },
+      { id: 'upgrade',  label: 'Upgrade' },
+    ],
+    memberBalance: null,
+    memberBalanceLoading: false,
+    memberRights: [],
+    memberLogs: [],
+    memberInvoices: [],
+    invoiceDetailId: null,
+    invoiceDetailLoading: false,
+    invoiceDetail: null,
+    detailAddItems: [],
+    detailNewItem: { article_id: '', qty: 1, unit_price: 0, credit_account: '' },
+    detailAddSaving: false,
+    detailPendingArticle: null,
+    correctionText: '',
+    correctionAmount: '',
+    correctionSaving: false,
+    correctionEditing: false,
+    memberTags: [],
+    memberUpgrade: null,
+    memberUpgradeHistory: [],
+    newTagId: '',
+
+    // ── Assignments ───────────────────────────────────────────────────────────
+    assignments: [],
+    assignmentsLoading: false,
+    assignmentsFrom: '',
+    assignmentsTo: '',
+    labmanagers: [],
+    generateModal: false,
+    genFrom: '',
+    genTo: '',
+    assignmentModal: false,
+    editAssignment: {},
+
+    // ── Balance ───────────────────────────────────────────────────────────────
+    balanceMemberSearch: '',
+    balanceCandidates: [],
+    balanceSelectedMember: null,
+    currentBalance: null,
+    balanceAction: 'deposit',
+    balanceAmount: '',
+
+    // ── My Account (Member Dashboard) ────────────────────────────────────────
+    myActiveSessions: [],
+    myPreview: [],
+    myPreviewTotal: 0,
+    myInvoices: [],
+    myBalance: null,
+    myAccountLoading: false,
+    myPayingInvoiceId: null,
+    _myAccountTimer: null,
+    myArticles: [],
+    myCart: [],
+    myCartArticleId: '',
+    myCartQty: 1,
+    myOrderSaving: false,
+
+    // ── Machine Status ────────────────────────────────────────────────────────
+    machineStatus: [],
+    machineStatusLoading: false,
+    _machineStatusTimer: null,
+    _nowTimer: null,
+    _now: Date.now(),
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+    schedules: [],
+    googleAuthorised: false,
+    weekdays: ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'],
+    woblingSyncing: false,
+    woblingSyncResult: '',
+
+    // ── Profile ───────────────────────────────────────────────────────────────
+    pwCurrent: '',
+    pwNew: '',
+    pwConfirm: '',
+    prefWeekday: '',
+    prefPriority: 5,
+    prefMaxPerMonth: 4,
+    badgeLoginEnabled: false,
+    badgeUid: '',
+
+    // ── Invoice ───────────────────────────────────────────────────────────────
+    payInvoiceModal: { open: false, invoice: null, paymodeId: null },
+    invoiceModal: false,
+    invoiceLoading: false,
+    invoiceLines: [],
+    invoiceTotal: 0,
+    invoicePaymodeId: null,
+    invoicePaymodes: [],
+    invoiceArticles: [],
+    invoiceCreditAccounts: [],
+    invoiceItems: [],
+    invoiceNewItem: { article_id: '', qty: 1, unit_price: 0, credit_account: '' },
+
+    // ── Dialogs ───────────────────────────────────────────────────────────────
+    confirmDialog: null,
+    replaceTagModal: false,
+    replaceTagTarget: null,
+    newReplacementTagId: '',
+
+    // ── New member ────────────────────────────────────────────────────────────
+    newMemberModal: false,
+    newMember: { name: '', email: '', password: '', roles: ['member'] },
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    async init() {
+      if (this.resetToken) {
+        // Reset-Link hat Vorrang – ausloggen damit der Reset-Block sichtbar wird
+        this.token = null;
+        this.user  = null;
+        localStorage.removeItem('flw_token');
+        localStorage.removeItem('flw_user');
+        this.loginView = 'reset-confirm';
+      } else if (this.token) {
+        this._scheduleAutoLogout(this.token);
+        this._initDateRange();
+        const startView = this.isPrivileged ? 'members' : 'my-account';
+        await this.navigate(startView);
+      }
+    },
+
+    _initDateRange() {
+      const today = new Date();
+      const end   = new Date(today);
+      end.setDate(end.getDate() + 27);
+      this.assignmentsFrom = this._isoDate(today);
+      this.assignmentsTo   = this._isoDate(end);
+      this.genFrom         = this._isoDate(today);
+      this.genTo           = this._isoDate(end);
+    },
+
+    // ── Computed ──────────────────────────────────────────────────────────────
+    get isPrivileged() {
+      return this.user?.roles?.some(r => ['admin','labmanager'].includes(r));
+    },
+    get isAdmin() {
+      return this.user?.roles?.includes('admin');
+    },
+    get isLabmanager() {
+      return this.user?.roles?.some(r => ['admin','labmanager'].includes(r));
+    },
+
+    navItems() {
+      const items = [];
+      if (!this.isPrivileged) items.push({ id: 'my-account',  icon: '🏠', label: 'Mein Konto' });
+      if (this.isPrivileged) items.push({ id: 'members',     icon: '👥', label: 'Mitglieder' });
+      if (this.isLabmanager) items.push({ id: 'assignments', icon: '📅', label: 'Einsatzplanung' });
+      if (this.isPrivileged) items.push({ id: 'balance',     icon: '💰', label: 'Guthaben' });
+      if (this.isLabmanager) items.push({ id: 'machine-status', icon: '🖥️', label: 'Belegung' });
+      if (this.isLabmanager) items.push({ id: 'settings',    icon: '⚙️', label: 'Einstellungen' });
+      items.push(              { id: 'profile',    icon: '👤', label: 'Profil' });
+      return items;
+    },
+
+    // ── Auth ──────────────────────────────────────────────────────────────────
+    async login() {
+      this.loginLoading = true;
+      this.loginError   = '';
+      try {
+        // Badge-UID: nur Ziffern → badge-login versuchen
+        if (/^\d+$/.test(this.loginEmail)) {
+          const body = { badge_uid: this.loginEmail };
+          if (this.badgeNeedsPassword) body.password = this.loginPassword;
+          const r = await fetch('/api/auth/badge-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await r.json();
+          if (!r.ok) {
+            if (data.error_code === 'BADGE_LOGIN_DISABLED') {
+              this.badgeNeedsPassword = true;
+              this.loginError = 'Bitte Passwort eingeben';
+              return;
+            }
+            this.loginError = data.error || 'Badge-Login fehlgeschlagen';
+            return;
+          }
+          this.token = data.token;
+          this.user  = data.user;
+          localStorage.setItem('flw_token', data.token);
+          localStorage.setItem('flw_user',  JSON.stringify(data.user));
+          this._scheduleAutoLogout(data.token);
+          this.loginEmail = '';
+          this.badgeNeedsPassword = false;
+          this._initDateRange();
+          await this.navigate(this.isPrivileged ? 'members' : 'assignments');
+          return;
+        }
+        // Normal: E-Mail + Passwort
+        const res = await this._fetch('POST', '/api/auth/login',
+          { email: this.loginEmail, password: this.loginPassword }, false);
+        this.token = res.token;
+        this.user  = res.user;
+        localStorage.setItem('flw_token', res.token);
+        localStorage.setItem('flw_user',  JSON.stringify(res.user));
+        this._scheduleAutoLogout(res.token);
+        this._initDateRange();
+        await this.navigate(this.isPrivileged ? 'members' : 'assignments');
+      } catch (err) {
+        this.loginError = err.message || 'Anmeldung fehlgeschlagen';
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+
+    async badgeLogin() {
+      if (!this.badgeUid) return;
+      this.loginLoading = true;
+      this.loginError   = '';
+      try {
+        const res = await fetch('/api/auth/badge-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ badge_uid: this.badgeUid }),
+        });
+        const data = await res.json();
+        if (!res.ok) { this.loginError = data.error || 'Fehler'; return; }
+        this.token  = data.token;
+        this.user   = data.user;
+        this.roles  = data.user.roles || [];
+        localStorage.setItem('flw_token', data.token);
+        this._scheduleAutoLogout(data.token);
+        this.loginView = 'login';
+        this.badgeUid  = '';
+        await this.init();
+      } catch (err) {
+        this.loginError = err.message;
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+
+    async toggleBadgeLogin() {
+      try {
+        const res = await this._put('/api/auth/badge-login-toggle', { enabled: this.badgeLoginEnabled });
+        if (!res.ok) { this.showToast('Fehler beim Speichern', 'error'); this.badgeLoginEnabled = !this.badgeLoginEnabled; }
+      } catch (err) {
+        this.showToast(err.message, 'error');
+        this.badgeLoginEnabled = !this.badgeLoginEnabled;
+      }
+    },
+
+    async requestReset() {
+      this.loginLoading = true;
+      this.loginError   = '';
+      this.resetMsg     = '';
+      try {
+        await this._fetch('POST', '/api/auth/reset-request', { email: this.loginEmail }, false);
+        this.resetMsg = 'Falls die E-Mail bekannt ist, wurde ein Link verschickt. Bitte prüfe dein Postfach.';
+      } catch (err) {
+        this.loginError = err.message || 'Fehler';
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+
+    async confirmReset() {
+      this.loginError = '';
+      if (this.resetPassword !== this.resetPassword2) {
+        this.loginError = 'Passwörter stimmen nicht überein';
+        return;
+      }
+      this.loginLoading = true;
+      try {
+        await this._fetch('POST', '/api/auth/reset-confirm',
+          { token: this.resetToken, password: this.resetPassword }, false);
+        history.replaceState(null, '', '/');
+        this.resetToken    = '';
+        this.loginView     = 'login';
+        this.resetPassword  = '';
+        this.resetPassword2 = '';
+        this.showToast('Passwort gespeichert – bitte anmelden');
+      } catch (err) {
+        this.loginError = err.message || 'Fehler';
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+
+    logout() {
+      clearTimeout(this._autoLogoutTimer);
+      this._autoLogoutTimer = null;
+      this.token = null;
+      this.user  = null;
+      localStorage.removeItem('flw_token');
+      localStorage.removeItem('flw_user');
+      this.members          = [];
+      this.selectedMember   = null;
+      this.assignments      = [];
+      this.loginEmail       = '';
+      this.loginPassword    = '';
+      this.loginError       = '';
+      this.badgeNeedsPassword = false;
+      this.showPw           = false;
+    },
+
+    _scheduleAutoLogout(token) {
+      clearTimeout(this._autoLogoutTimer);
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const ms = payload.exp * 1000 - Date.now();
+        if (ms <= 0) { this._autoLogout(); return; }
+        this._autoLogoutTimer = setTimeout(() => this._autoLogout(), ms);
+      } catch { /* ungültiges JWT – ignorieren */ }
+    },
+
+    _autoLogout() {
+      this.logout();
+      this.loginError = 'Sitzung abgelaufen – bitte erneut anmelden.';
+    },
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+    async navigate(id) {
+      this.view = id;
+      if (id !== 'machine-status') this._stopMachineStatusPoll();
+      if (id === 'members' && this.members.length === 0) await this.loadMembers();
+      if (id === 'assignments')    await this.loadAssignments();
+      if (id === 'settings')       await this.loadSettings();
+      if (id === 'profile')        await this.loadPreferences();
+      if (id === 'machine-status') await this._startMachineStatusPoll();
+      if (id === 'my-account')     await this.loadMyAccount();
+    },
+
+    // ── My Account (Member Dashboard) ────────────────────────────────────────
+    async loadMyAccount() {
+      const id = this.user.id;
+      this.myAccountLoading = true;
+      clearInterval(this._myAccountTimer);
+      try {
+        const [sessRes, prevRes, invRes, balRes] = await Promise.all([
+          this._get(`/api/browser/members/${id}/active-sessions`),
+          this._get(`/api/browser/members/${id}/invoice/preview`),
+          this._get(`/api/browser/members/${id}/invoices?limit=20`),
+          this._get(`/api/browser/members/${id}/balance`).catch(() => ({ balance: null })),
+        ]);
+        this.myActiveSessions = sessRes.sessions || [];
+        this.myPreview        = prevRes.lines    || [];
+        this.myPreviewTotal   = prevRes.total    || 0;
+        this.myInvoices       = invRes.invoices  || [];
+        this.myBalance        = balRes.balance   ?? null;
+
+        // Artikel einmalig laden
+        if (!this.myArticles.length) {
+          const ar = await this._get('/api/browser/articles').catch(() => ({ articles: [] }));
+          this.myArticles = ar.articles || [];
+        }
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.myAccountLoading = false;
+      }
+      // Live-Updates: aktive Sessions alle 15s, _now jede Sekunde
+      this._myAccountTimer = setInterval(async () => {
+        if (this.view !== 'my-account') { clearInterval(this._myAccountTimer); return; }
+        this._now = Date.now();
+        const r = await this._get(`/api/browser/members/${id}/active-sessions`).catch(() => null);
+        if (r) this.myActiveSessions = r.sessions || [];
+      }, 15000);
+      // Sekundenticker für Laufzeit
+      if (!this._nowTimer) this._nowTimer = setInterval(() => { this._now = Date.now(); }, 1000);
+    },
+
+    myAddToCart() {
+      const art = this.myArticles.find(a => a.id == this.myCartArticleId);
+      if (!art) return;
+      const qty = Math.max(1, parseInt(this.myCartQty) || 1);
+      const existing = this.myCart.find(i => i.article_id === art.id);
+      if (existing) { existing.qty += qty; }
+      else {
+        this.myCart.push({
+          article_id:  art.id,
+          description: art.name,
+          qty,
+          unit_price:  parseFloat(art.price) || 0,
+          is_balance_deposit: false,
+          credit_account: art.konto_nr || null,
+        });
+      }
+      this.myCartArticleId = '';
+      this.myCartQty = 1;
+    },
+
+    async mySubmitOrder() {
+      const openInv = this.myInvoices.find(i => !i.paymode);
+      if (!this.myCart.length || !openInv) return;
+      this.myOrderSaving = true;
+      const items = this.myCart.map(i => ({
+        description:        i.description,
+        quantity:           i.qty,
+        unit_price:         i.unit_price,
+        is_balance_deposit: false,
+        credit_account:     i.credit_account || null,
+      }));
+      try {
+        await this._post(`/api/browser/invoices/${openInv.id}/items`, { items });
+        this.showToast('Artikel zur Rechnung hinzugefügt');
+        this.myCart = [];
+        await this.loadMyAccount();
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.myOrderSaving = false;
+      }
+    },
+
+    // ── Machine Status ────────────────────────────────────────────────────────
+    async _startMachineStatusPoll() {
+      await this.loadMachineStatus();
+      this._machineStatusTimer = setInterval(() => this.loadMachineStatus(), 15000);
+      this._nowTimer           = setInterval(() => { this._now = Date.now(); }, 1000);
+    },
+
+    _stopMachineStatusPoll() {
+      clearInterval(this._machineStatusTimer);
+      clearInterval(this._nowTimer);
+      this._machineStatusTimer = null;
+      this._nowTimer           = null;
+    },
+
+    async loadMachineStatus() {
+      try {
+        const res = await this._get('/api/browser/machines/status');
+        this.machineStatus = res.machines;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    machineElapsed(machine) {
+      if (!machine.in_use || !machine.session_start) return null;
+      const startMs = new Date(String(machine.session_start).replace(' ', 'T')).getTime();
+      return Math.max(0, Math.floor((this._now - startMs) / 1000));
+    },
+
+    heartbeatAgo(machine) {
+      if (!machine.last_heartbeat) return null;
+      const ms = this._now - new Date(String(machine.last_heartbeat).replace(' ', 'T')).getTime();
+      const min = Math.floor(ms / 60000);
+      if (min < 2)  return 'gerade eben';
+      if (min < 60) return `vor ${min} min`;
+      return `vor ${Math.floor(min/60)}h`;
+    },
+
+    // ── Members ───────────────────────────────────────────────────────────────
+    startBadgeScan() {
+      this.membersSearch = '';
+      this.$nextTick(() => {
+        const input = this.$refs.membersSearchInput;
+        input.focus();
+        input.select();
+        this.showToast('Badge jetzt auf den Leser legen…', 'info');
+      });
+    },
+
+    async loadMembers() {
+      const prevTab = this.memberTab;
+      this.membersLoading = true;
+      try {
+        const p = new URLSearchParams({ limit: 100 });
+        if (this.membersSearch) p.set('search', this.membersSearch);
+        if (this.membersActive !== '') p.set('active', this.membersActive);
+        if (this.membersRole)  p.set('role',   this.membersRole);
+        const res = await this._get('/api/browser/members?' + p);
+        this.members = res.members;
+        if (res.members.length === 1) await this.selectMember(res.members[0], prevTab);
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.membersLoading = false;
+      }
+    },
+
+    async selectMember(m, preserveTab = null) {
+      const targetTab = preserveTab || 'info';
+      this.selectedMember     = m;
+      this.memberTab          = targetTab;
+      this.memberBalance      = null;
+      this.memberRights       = [];
+      this.memberLogs         = [];
+      this.memberInvoices     = [];
+      this.memberTags         = [];
+      this.memberUpgrade      = null;
+      this.memberUpgradeHistory = [];
+      this.rightsActiveTagId  = null;
+      try {
+        const detail = await this._get('/api/browser/members/' + m.id);
+        this.selectedMember = {
+          ...detail,
+          roles:     Array.isArray(detail.roles) ? detail.roles : (detail.roles ? detail.roles.split(',') : []),
+          knowledge: detail.knowledge || [],
+        };
+        if (this.canEdit() && this.allKnowledge.length === 0) {
+          const kr = await this._get('/api/browser/knowledge');
+          this.allKnowledge = kr.knowledge;
+        }
+        if (targetTab !== 'info') await this.loadMemberTab(targetTab);
+      } catch (_) {}
+    },
+
+    async setMemberTab(tab) {
+      this.memberTab = tab;
+      await this.loadMemberTab(tab);
+    },
+
+    async loadMemberTab(tab) {
+      if (!this.selectedMember) return;
+      const id = this.selectedMember.id;
+      try {
+        if (tab === 'balance') {
+          this.memberBalanceLoading = true;
+          const res = await this._get('/api/browser/members/' + id + '/balance');
+          this.memberBalance = res.balance;
+          this.memberBalanceLoading = false;
+        } else if (tab === 'rights') {
+          const [rightsRes, tagsRes] = await Promise.all([
+            this._get('/api/browser/members/' + id + '/rights'),
+            this._get('/api/browser/members/' + id + '/tags'),
+          ]);
+          this.memberRights = rightsRes.rights;
+          this.memberTags   = tagsRes.tags;
+          if (!this.rightsActiveTagId) {
+            this.rightsActiveTagId = this.memberTags.find(t => !t.blocked)?.id || null;
+          }
+          if (this.canEdit() && this.allMachines.length === 0) {
+            const mRes = await this._get('/api/browser/machines');
+            this.allMachines = mRes.machines;
+          }
+          if (!this._rightDefaultDaysLoaded) {
+            const cfg = await this._get('/api/browser/rights/defaults').catch(() => ({ default_days: 365 }));
+            this.rightDefaultDays = cfg.default_days || 365;
+            this._rightDefaultDaysLoaded = true;
+          }
+        } else if (tab === 'tags') {
+          const res = await this._get('/api/browser/members/' + id + '/tags');
+          this.memberTags = res.tags;
+        } else if (tab === 'logs') {
+          const res = await this._get('/api/browser/members/' + id + '/logs');
+          this.memberLogs = res.logs;
+        } else if (tab === 'invoices') {
+          const res = await this._get('/api/browser/members/' + id + '/invoices');
+          this.memberInvoices = res.invoices;
+        } else if (tab === 'upgrade') {
+          const res = await this._get('/api/browser/members/' + id + '/upgrade');
+          this.memberUpgrade        = res.current;
+          this.memberUpgradeHistory = res.history;
+        }
+      } catch (err) {
+        this.memberBalanceLoading = false;
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    canEdit() {
+      return this.isLabmanager;
+    },
+
+    async addKnowledge() {
+      if (!this.knowledgeToAdd || !this.selectedMember) return;
+      try {
+        await this._post(`/api/browser/members/${this.selectedMember.id}/knowledge/${this.knowledgeToAdd}`, {});
+        this.selectedMember.knowledge = [
+          ...this.selectedMember.knowledge,
+          this.allKnowledge.find(k => k.id === parseInt(this.knowledgeToAdd)),
+        ].filter(Boolean);
+        this.knowledgeToAdd = '';
+        this.showToast('Skill zugewiesen');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async removeKnowledge(knowledgeId) {
+      if (!this.selectedMember) return;
+      try {
+        await this._delete(`/api/browser/members/${this.selectedMember.id}/knowledge/${knowledgeId}`);
+        this.selectedMember.knowledge = this.selectedMember.knowledge.filter(k => k.id !== knowledgeId);
+        this.showToast('Skill entfernt');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    openNewKnowledge() {
+      this.newKnowledgeName = '';
+      this.newKnowledgeModal = true;
+    },
+
+    async createKnowledge() {
+      const name = this.newKnowledgeName.trim();
+      if (!name) return;
+      try {
+        const res = await this._post('/api/browser/knowledge', { name });
+        const entry = res.id ? res : res.knowledge;
+        this.allKnowledge = [...this.allKnowledge, entry].sort((a,b) => a.name.localeCompare(b.name));
+        this.newKnowledgeModal = false;
+        this.showToast('Skill angelegt');
+      } catch (err) {
+        if (err.message && err.message.includes('409')) {
+          this.newKnowledgeModal = false;
+          this.showToast('Skill bereits vorhanden', 'error');
+        } else {
+          this.showToast(err.message, 'error');
+        }
+      }
+    },
+
+    getRightForMachine(machineId) {
+      return this.memberRights.find(r =>
+        Number(r.machine_id) === Number(machineId) &&
+        String(r.tag_id) === String(this.rightsActiveTagId)
+      ) || null;
+    },
+
+    async toggleMachineRight(machine, checked) {
+      if (!this.rightsActiveTagId) return;
+      if (checked) {
+        // Recht anlegen mit Default-Daten
+        const toLocal = d => d.getFullYear() + '-' +
+          String(d.getMonth()+1).padStart(2,'0') + '-' +
+          String(d.getDate()).padStart(2,'0');
+        const today = new Date();
+        const end   = new Date(today);
+        end.setDate(end.getDate() + this.rightDefaultDays);
+        const valid_from = toLocal(today);
+        const valid_to   = toLocal(end);
+        try {
+          await this._post('/api/browser/rights', {
+            tag_id:     this.rightsActiveTagId,
+            machine_id: machine.id,
+            valid_from,
+            valid_to,
+          });
+          // Rechte neu laden
+          const res = await this._get('/api/browser/members/' + this.selectedMember.id + '/rights');
+          this.memberRights = res.rights;
+        } catch (err) {
+          this.showToast(err.message, 'error');
+        }
+      } else {
+        // Recht löschen
+        const r = this.getRightForMachine(machine.id);
+        if (!r) return;
+        if (!confirm(`Recht «${machine.name}» wirklich entfernen?`)) {
+          // Checkbox-State zurücksetzen (Alpine wird durch memberRights gesteuert)
+          return;
+        }
+        try {
+          await this._delete('/api/browser/rights/' + r.id);
+          this.memberRights = this.memberRights.filter(x => x.id !== r.id);
+        } catch (err) {
+          this.showToast(err.message, 'error');
+        }
+      }
+    },
+
+    isRightExpired(r) {
+      if (!r.valid_to) return false;
+      return new Date(r.valid_to) < new Date();
+    },
+
+    async openAddRight() {
+      if (this.allMachines.length === 0) {
+        const res = await this._get('/api/browser/machines');
+        this.allMachines = res.machines;
+      }
+      if (!this._rightDefaultDaysLoaded) {
+        const cfg = await this._get('/api/browser/rights/defaults').catch(() => ({ default_days: 365 }));
+        this.rightDefaultDays = cfg.default_days || 365;
+        this._rightDefaultDaysLoaded = true;
+      }
+      const tagRes = await this._get('/api/browser/members/' + this.selectedMember.id + '/tags');
+      this.memberTags = tagRes.tags;
+      const today = new Date();
+      const toLocal = d => d.getFullYear() + '-' +
+        String(d.getMonth() + 1).padStart(2, '0') + '-' +
+        String(d.getDate()).padStart(2, '0');
+      const validFrom = toLocal(today);
+      const validToDate = new Date(today);
+      validToDate.setDate(validToDate.getDate() + this.rightDefaultDays);
+      const validTo = toLocal(validToDate);
+      this.addRight = {
+        tag_id:     this.memberTags.find(t => !t.blocked)?.id || '',
+        machine_id: '',
+        valid_from: validFrom,
+        valid_to:   validTo,
+      };
+      this.addRightModal = true;
+    },
+
+    async saveAddRight() {
+      const { tag_id, machine_id, valid_from, valid_to } = this.addRight;
+      if (!tag_id || !machine_id) return this.showToast('Tag und Maschine erforderlich', 'error');
+      try {
+        await this._post('/api/browser/rights', {
+          tag_id, machine_id: parseInt(machine_id),
+          valid_from: valid_from || null,
+          valid_to:   valid_to   || null,
+        });
+        this.addRightModal = false;
+        this.showToast('Recht hinzugefügt');
+        const res = await this._get('/api/browser/members/' + this.selectedMember.id + '/rights');
+        this.memberRights = res.rights;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async updateRightDate(r, field, value) {
+      r[field] = value || null;
+      try {
+        await this._put('/api/browser/rights/' + r.id, {
+          valid_from: r.valid_from ? r.valid_from.slice(0,10) : null,
+          valid_to:   r.valid_to   ? r.valid_to.slice(0,10)   : null,
+        });
+        this.showToast('Datum gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async clearRightDate(r) {
+      r.valid_to = null;
+      try {
+        await this._put('/api/browser/rights/' + r.id, {
+          valid_from: r.valid_from ? r.valid_from.slice(0,10) : null,
+          valid_to:   null,
+        });
+        this.showToast('Ablaufdatum entfernt');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async removeRight(r) {
+      if (!confirm('Recht für «' + r.machine_name + '» wirklich entfernen?')) return;
+      try {
+        await this._delete('/api/browser/rights/' + r.id);
+        this.memberRights = this.memberRights.filter(x => x.id !== r.id);
+        this.showToast('Recht entfernt');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async issueTag() {
+      const tag_id = this.newTagId.trim();
+      if (!tag_id || !this.selectedMember) return;
+      try {
+        await this._post('/api/browser/members/' + this.selectedMember.id + '/tags', { tag_id });
+        this.newTagId = '';
+        this.showToast('Badge ausgegeben');
+        await this.loadMemberTab('tags');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    blockTagPrompt(tag) {
+      this.confirmDialog = {
+        msg: 'Badge ' + tag.id + ' wirklich sperren?',
+        cb:  () => this.blockTag(tag),
+      };
+    },
+
+    async blockTag(tag) {
+      try {
+        await this._post('/api/browser/tags/' + tag.id + '/block', {});
+        this.showToast('Badge gesperrt');
+        await this.loadMemberTab('tags');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    replaceTagPrompt(tag) {
+      this.replaceTagTarget    = tag;
+      this.newReplacementTagId = '';
+      this.replaceTagModal     = true;
+    },
+
+    async replaceTag() {
+      const new_tag_id = this.newReplacementTagId.trim();
+      if (!new_tag_id) return;
+      try {
+        const res = await this._post('/api/browser/tags/' + this.replaceTagTarget.id + '/replace', { new_tag_id });
+        this.replaceTagModal = false;
+        this.showToast('Badge ersetzt – Depot CHF ' + (res.deposit || 20) + ' erfasst');
+        await this.loadMemberTab('tags');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    deleteTagPrompt(tag) {
+      this.confirmDialog = {
+        msg: 'Tag ' + tag.id + ' wirklich löschen? Er kann danach einem anderen Mitglied zugeordnet werden.',
+        cb:  () => this.deleteTag(tag),
+      };
+    },
+
+    async deleteTag(tag) {
+      try {
+        await this._delete('/api/browser/tags/' + tag.id);
+        this.memberTags = this.memberTags.filter(t => t.id !== tag.id);
+        this.showToast('Tag gelöscht');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    returnTagPrompt(tag) {
+      this.confirmDialog = {
+        msg: 'Originalkarte ' + tag.id + ' wurde zurückgebracht?\nErsatzkarte wird freigegeben und Depot zurückerstattet.',
+        cb:  () => this.returnTag(tag),
+      };
+    },
+
+    async returnTag(tag) {
+      try {
+        const res = await this._post('/api/browser/tags/' + tag.id + '/return', {});
+        this.showToast('Karte reaktiviert – Depot CHF ' + res.deposit_returned + ' zurückerstattet');
+        await this.loadMemberTab('tags');
+        await this.loadMemberTab('rights');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async openInvoicePreview() {
+      if (!this.selectedMember) return;
+      this.invoiceLines        = [];
+      this.invoiceItems        = [];
+      this.invoiceTotal        = 0;
+      this.invoicePaymodeId    = null;
+      this.invoiceNewItem      = { article_id: '', qty: 1, unit_price: 0, credit_account: '' };
+      this.invoiceLoading      = true;
+      this.invoiceModal        = true;
+      try {
+        const [preview, artRes, pmRes] = await Promise.all([
+          this._get('/api/browser/members/' + this.selectedMember.id + '/invoice/preview'),
+          this._get('/api/browser/articles'),
+          this._get('/api/browser/paymodes'),
+        ]);
+        this.invoiceLines         = preview.lines;
+        this.invoiceTotal         = preview.total;
+        this.invoiceArticles      = artRes.articles;
+        this.invoiceCreditAccounts = artRes.creditAccounts;
+        this.invoicePaymodes      = pmRes.paymodes;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+        this.invoiceModal = false;
+      } finally {
+        this.invoiceLoading = false;
+      }
+    },
+
+    invoiceMissingKontoWarnings() {
+      const missing = [];
+      for (const line of this.invoiceLines) {
+        if (!line.konto_nr) missing.push(`Maschine «${line.machine_name}»`);
+      }
+      for (const item of this.invoiceItems) {
+        if (!item.is_balance_deposit && !item.credit_account) missing.push(`Artikel «${item.description}»`);
+      }
+      return missing;
+    },
+
+    invoiceSelectedPaymode() {
+      return this.invoicePaymodes.find(p => p.id === this.invoicePaymodeId) || null;
+    },
+
+    get invoiceGrandTotal() {
+      const itemsTotal = this.invoiceItems.reduce((s, i) => s + i.qty * i.unit_price, 0);
+      return +(this.invoiceTotal + itemsTotal).toFixed(2);
+    },
+
+    invoiceSelectedArticle() {
+      return this.invoiceArticles.find(a => a.id == this.invoiceNewItem.article_id) || null;
+    },
+
+    addInvoiceItem() {
+      const art = this.invoiceSelectedArticle();
+      if (!art) return;
+      const qty   = Math.max(0.001, parseFloat(this.invoiceNewItem.qty) || 1);
+      const price = parseFloat(this.invoiceNewItem.unit_price) || 0;
+      if (art.is_balance_deposit && price <= 0) { this.showToast('Betrag eingeben', 'error'); return; }
+      if (art.is_balance_deposit && !art.konto_nr) { this.showToast('Artikel hat kein Buchungskonto konfiguriert', 'error'); return; }
+      this.invoiceItems.push({
+        article_id:        art.id,
+        description:       art.name,
+        qty,
+        unit_price:        art.is_balance_deposit ? price : (parseFloat(art.price) || price),
+        is_balance_deposit: !!art.is_balance_deposit,
+        credit_account:    art.konto_nr || null,
+      });
+      this.invoiceNewItem = { article_id: '', qty: 1, unit_price: 0, credit_account: '' };
+    },
+
+    autoAddFixedArticle() {
+      const art = this.invoiceSelectedArticle();
+      if (!art || art.is_balance_deposit) return;
+      // Pre-fill price and reset qty to 1 so user can enter quantity before adding
+      this.invoiceNewItem.unit_price = parseFloat(art.price) || 0;
+      this.invoiceNewItem.qty = 1;
+    },
+
+    removeInvoiceItem(idx) {
+      this.invoiceItems.splice(idx, 1);
+    },
+
+    async createInvoice() {
+      try {
+        const items = this.invoiceItems.map(i => ({
+          description:        i.description,
+          quantity:           i.qty,
+          unit_price:         i.unit_price,
+          is_balance_deposit: i.is_balance_deposit,
+          credit_account:     i.credit_account || null,
+        }));
+        const res = await this._post('/api/browser/members/' + this.selectedMember.id + '/invoice', {
+          paymode_id: this.invoicePaymodeId || null,
+          items,
+        });
+        this.invoiceModal = false;
+        if (res.webling_warning) {
+          this.showToast('Rechnung #' + res.invoice_id + ' erstellt – Webling-Buchung fehlgeschlagen: ' + res.webling_warning, 'error');
+        } else if (res.invoice_id) {
+          this.showToast('Rechnung #' + res.invoice_id + ' erstellt' + (this.invoicePaymodeId ? ' und in Webling gebucht' : '') + ' – CHF ' + Number(res.total).toFixed(2));
+        }
+        // Invoices-Tab öffnen und neue Rechnung aufklappen
+        await this.setMemberTab('invoices');
+        const newInv = this.memberInvoices.find(i => i.id === res.invoice_id);
+        if (newInv) await this.toggleInvoiceDetail(newInv);
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async toggleInvoiceDetail(inv) {
+      if (this.invoiceDetailId === inv.id) { this.invoiceDetailId = null; return; }
+      this.invoiceDetailId = inv.id;
+      this.invoiceDetail = null;
+      this.invoiceDetailLoading = true;
+      this.detailAddItems = [];
+      this.detailNewItem = { article_id: '', qty: 1, unit_price: 0, credit_account: '' };
+      this.correctionText = '';
+      this.correctionAmount = '';
+      this.correctionEditing = false;
+      this.detailPendingArticle = null;
+      try {
+        const [r, artRes] = await Promise.all([
+          this._get(`/api/browser/invoices/${inv.id}`),
+          this.invoiceArticles.length ? Promise.resolve({ articles: this.invoiceArticles, creditAccounts: this.invoiceCreditAccounts })
+            : this._get('/api/browser/articles'),
+        ]);
+        this.invoiceDetail = r;
+        if (!this.invoiceArticles.length) {
+          this.invoiceArticles      = artRes.articles;
+          this.invoiceCreditAccounts = artRes.creditAccounts || [];
+        }
+      } catch (err) {
+        this.showToast(err.message, 'error');
+        this.invoiceDetailId = null;
+      } finally {
+        this.invoiceDetailLoading = false;
+      }
+    },
+
+    detailSelectedArticle() {
+      return this.invoiceArticles.find(a => a.id == this.detailNewItem.article_id) || null;
+    },
+
+    detailAutoFill() {
+      const art = this.detailSelectedArticle();
+      if (!art || art.is_balance_deposit) return;
+      this.detailNewItem.unit_price = parseFloat(art.price) || 0;
+      this.detailNewItem.qty = 1;
+    },
+
+    detailSelectArticle(articleId) {
+      if (!articleId) return;
+      const art = this.invoiceArticles.find(a => a.id == articleId);
+      if (!art) return;
+      const qty = 1;
+      const price = parseFloat(art.price) || 0;
+      this.detailPendingArticle = {
+        article_id:  art.id,
+        name:        art.name,
+        qty,
+        unit_price:  price,
+        total:       +(qty * price).toFixed(2),
+        konto_nr:    art.konto_nr || null,
+        is_balance_deposit: !!art.is_balance_deposit,
+      };
+    },
+
+    async savePendingArticle(inv) {
+      const p = this.detailPendingArticle;
+      if (!p) return;
+      try {
+        await this._post(`/api/browser/invoices/${inv.id}/items`, { items: [{
+          description:        p.name,
+          quantity:           Math.max(1, p.qty || 1),
+          unit_price:         p.unit_price,
+          is_balance_deposit: p.is_balance_deposit,
+          is_correction:      false,
+          credit_account:     p.konto_nr || null,
+        }]});
+        this.detailPendingArticle = null;
+        this.showToast('Artikel gespeichert');
+        const [r, invRes] = await Promise.all([
+          this._get(`/api/browser/invoices/${inv.id}`),
+          this._get(`/api/browser/members/${this.selectedMember.id}/invoices`),
+        ]);
+        this.invoiceDetail = r;
+        this.memberInvoices = invRes.invoices;
+        const li = this.memberInvoices.find(i => i.id === inv.id);
+        if (li) inv.total = li.total;
+      } catch (err) { this.showToast(err.message, 'error'); }
+    },
+
+    startEditCorrection(inv) {
+      const c = this.invoiceDetail.items.find(i => i.is_correction);
+      if (c) {
+        this.correctionText   = c.description;
+        this.correctionAmount = Number(c.total);
+        this._correctionItemId = Number(c.id);
+      }
+      this.correctionEditing = true;
+    },
+
+    addDetailItem() {
+      const art = this.detailSelectedArticle();
+      if (!art) return;
+      const qty   = Math.max(1, parseInt(this.detailNewItem.qty) || 1);
+      const price = parseFloat(this.detailNewItem.unit_price) || 0;
+      if (art.is_balance_deposit && price <= 0) { this.showToast('Betrag eingeben', 'error'); return; }
+      if (art.is_balance_deposit && !this.detailNewItem.credit_account) { this.showToast('Konto auswählen', 'error'); return; }
+      this.detailAddItems.push({
+        description:        art.name,
+        quantity:           qty,
+        unit_price:         art.is_balance_deposit ? price : (parseFloat(art.price) || price),
+        is_balance_deposit: !!art.is_balance_deposit,
+        credit_account:     art.is_balance_deposit
+          ? (this.detailNewItem.credit_account || null)
+          : (art.konto_nr || null),
+      });
+      this.detailNewItem = { article_id: '', qty: 1, unit_price: 0, credit_account: '' };
+    },
+
+    async deleteInvoiceItem(inv, item) {
+      if (!confirm(`Position «${item.description.slice(0,40)}» löschen?`)) return;
+      try {
+        await this._delete(`/api/browser/invoices/${inv.id}/items/${item.id}`);
+        this.showToast('Position gelöscht');
+        const [r, invRes] = await Promise.all([
+          this._get(`/api/browser/invoices/${inv.id}`),
+          this._get(`/api/browser/members/${this.selectedMember.id}/invoices`),
+        ]);
+        this.invoiceDetail = r;
+        this.memberInvoices = invRes.invoices;
+        // Total im Listenitem aktualisieren
+        const li = this.memberInvoices.find(i => i.id === inv.id);
+        if (li) inv.total = li.total;
+      } catch (err) { this.showToast(err.message, 'error'); }
+    },
+
+    async saveCorrection(inv) {
+      if (!this.correctionText.trim() || this.correctionAmount === '') return;
+      this.correctionSaving = true;
+      try {
+        // Bestehende Korrektur löschen wenn Bearbeitung
+        if (this._correctionItemId) {
+          await this._delete(`/api/browser/invoices/${inv.id}/items/${this._correctionItemId}`);
+          this._correctionItemId = null;
+        }
+        await this._post(`/api/browser/invoices/${inv.id}/items`, {
+          items: [{
+            description:        this.correctionText.trim(),
+            quantity:           1,
+            unit_price:         parseFloat(this.correctionAmount),
+            is_balance_deposit: false,
+            is_correction:      true,
+            credit_account:     null,
+          }],
+        });
+        this.correctionText    = '';
+        this.correctionAmount  = '';
+        this.correctionEditing = false;
+        this.showToast('Korrektur gespeichert');
+        const [r, invRes] = await Promise.all([
+          this._get(`/api/browser/invoices/${inv.id}`),
+          this._get(`/api/browser/members/${this.selectedMember.id}/invoices`),
+        ]);
+        this.invoiceDetail = r;
+        this.memberInvoices = invRes.invoices;
+        const li = this.memberInvoices.find(i => i.id === inv.id);
+        if (li) inv.total = li.total;
+      } catch (err) { this.showToast(err.message, 'error'); }
+      finally { this.correctionSaving = false; }
+    },
+
+    async saveDetailItems(invoiceId) {
+      if (!this.detailAddItems.length) return;
+      this.detailAddSaving = true;
+      try {
+        await this._post(`/api/browser/invoices/${invoiceId}/items`, { items: this.detailAddItems });
+        this.showToast('Artikel hinzugefügt');
+        // Reload detail + invoice list
+        const [r, invRes] = await Promise.all([
+          this._get(`/api/browser/invoices/${invoiceId}`),
+          this._get(`/api/browser/members/${this.selectedMember.id}/invoices`),
+        ]);
+        this.invoiceDetail = r;
+        this.memberInvoices = invRes.invoices;
+        this.detailAddItems = [];
+        this.detailNewItem  = { article_id: '', qty: 1, unit_price: 0, credit_account: '' };
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.detailAddSaving = false;
+      }
+    },
+
+    async openPayInvoice(inv) {
+      if (!this.invoicePaymodes.length) {
+        const r = await this._get('/api/browser/paymodes');
+        this.invoicePaymodes = r.paymodes || [];
+      }
+      this.payInvoiceModal = { open: true, invoice: inv, paymodeId: null };
+    },
+
+    async confirmPayInvoice() {
+      const { invoice, paymodeId } = this.payInvoiceModal;
+      if (!paymodeId) return;
+      try {
+        const r = await this._patch(`/api/browser/invoices/${invoice.id}/pay`, { paymode_id: paymodeId });
+        this.payInvoiceModal.open = false;
+        this.invoiceDetailId = null;
+        if (r.webling_warning) {
+          this.showToast(`Rechnung #${invoice.id} bezahlt – Webling-Buchung fehlgeschlagen: ${r.webling_warning}`, 'error');
+        } else {
+          this.showToast(`Rechnung #${invoice.id} bezahlt und in Webling gebucht`);
+        }
+        await this.loadMemberTab('invoices');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async unPayInvoice(inv) {
+      if (!confirm(`Bezahlung von Rechnung #${inv.id} wirklich löschen?\n\nDie Webling-Buchung muss danach manuell gelöscht werden.`)) return;
+      try {
+        const r = await this._delete(`/api/browser/invoices/${inv.id}/pay`);
+        this.invoiceDetailId = null;
+        this.showToast(`Bezahlung gelöscht – Webling-Buchung manuell löschen!`, 'error');
+        await this.loadMemberTab('invoices');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async cancelInvoice(inv) {
+      if (!confirm(`Rechnung #${inv.id} über CHF ${Number(inv.total).toFixed(2)} wirklich stornieren? Die Logs werden wieder als offen markiert.`)) return;
+      try {
+        const res = await this._delete(`/api/browser/invoices/${inv.id}`);
+        if (!res.ok) { const e = await res.json(); this.showToast(e.error || 'Fehler', 'error'); return; }
+        this.showToast(`Rechnung #${inv.id} storniert`);
+        await this.loadMemberTab('invoices');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async downloadPdf(inv) {
+      try {
+        const res = await fetch('/api/browser/invoices/' + inv.id + '/pdf', {
+          headers: { 'Authorization': 'Bearer ' + this.token },
+        });
+        if (!res.ok) { const e = await res.json().catch(()=>{}); this.showToast((e && e.error) || 'PDF nicht gefunden', 'error'); return; }
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    // ── Assignments ───────────────────────────────────────────────────────────
+    async loadAssignments() {
+      this.assignmentsLoading = true;
+      try {
+        const p   = new URLSearchParams({ from: this.assignmentsFrom, to: this.assignmentsTo });
+        const res = await this._get('/api/assignments?' + p);
+        this.assignments = res.assignments;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.assignmentsLoading = false;
+      }
+    },
+
+    async _ensureLabmanagers() {
+      if (this.labmanagers.length) return;
+      try {
+        const res = await this._get('/api/browser/members?role=labmanager&active=1&limit=100');
+        this.labmanagers = res.members;
+      } catch (_) {}
+    },
+
+    async openNewAssignment() {
+      await this._ensureLabmanagers();
+      this.editAssignment = {
+        user_id:    this.labmanagers[0]?.id || '',
+        date:       this._isoDate(new Date()),
+        start_time: '',
+        end_time:   '',
+      };
+      this.assignmentModal = true;
+    },
+
+    async openEditAssignment(a) {
+      await this._ensureLabmanagers();
+      this.editAssignment = {
+        id:         a.id,
+        user_id:    a.user_id,
+        date:       a.date,
+        start_time: this.fmtTime(a.start_time),
+        end_time:   this.fmtTime(a.end_time),
+      };
+      this.assignmentModal = true;
+    },
+
+    async saveAssignment() {
+      try {
+        if (this.editAssignment.id) {
+          await this._put('/api/assignments/' + this.editAssignment.id, this.editAssignment);
+          this.showToast('Einsatz aktualisiert');
+        } else {
+          await this._post('/api/assignments', this.editAssignment);
+          this.showToast('Einsatz erstellt');
+        }
+        this.assignmentModal = false;
+        await this.loadAssignments();
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async generateAssignments() {
+      try {
+        const res = await this._post('/api/assignments/generate', { from: this.genFrom, to: this.genTo });
+        this.generateModal = false;
+        this.showToast(res.created + ' Einsätze generiert');
+        await this.loadAssignments();
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    requestSubstitutePrompt(a) {
+      this.confirmDialog = {
+        msg: 'Vertretung für ' + a.user_name + ' am ' + this.fmtDate(a.date) + ' suchen?',
+        cb:  async () => {
+          try {
+            await this._post('/api/assignments/' + a.id + '/substitute', {});
+            this.showToast('Vertretungsanfrage verschickt');
+          } catch (err) {
+            this.showToast(err.message, 'error');
+          }
+        },
+      };
+    },
+
+    deleteAssignmentPrompt(a) {
+      this.confirmDialog = {
+        msg: 'Einsatz von ' + a.user_name + ' am ' + this.fmtDate(a.date) + ' wirklich absagen?',
+        cb:  async () => {
+          try {
+            await this._delete('/api/assignments/' + a.id);
+            this.showToast('Einsatz abgesagt');
+            await this.loadAssignments();
+          } catch (err) {
+            this.showToast(err.message, 'error');
+          }
+        },
+      };
+    },
+
+    // ── Balance ───────────────────────────────────────────────────────────────
+    async balanceSearchMember() {
+      if (!this.balanceMemberSearch.trim()) return;
+      try {
+        const p   = new URLSearchParams({ search: this.balanceMemberSearch, active: '1', limit: '10' });
+        const res = await this._get('/api/browser/members?' + p);
+        this.balanceCandidates = res.members;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async selectBalanceMember(m) {
+      this.balanceSelectedMember = m;
+      this.balanceCandidates     = [];
+      this.balanceMemberSearch   = m.name;
+      this.currentBalance        = null;
+      try {
+        const res = await this._get('/api/browser/members/' + m.id + '/balance');
+        this.currentBalance = res.balance;
+      } catch (_) {}
+    },
+
+    async submitBalance() {
+      if (!this.balanceAmount || !this.balanceSelectedMember) return;
+      try {
+        await this._post('/api/balance/' + this.balanceAction, {
+          member_id: this.balanceSelectedMember.id,
+          amount:    parseFloat(this.balanceAmount),
+        });
+        this.showToast('Buchung erfolgreich');
+        this.balanceAmount  = '';
+        const res = await this._get('/api/browser/members/' + this.balanceSelectedMember.id + '/balance');
+        this.currentBalance = res.balance;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+    async loadSettings() {
+      const results = await Promise.allSettled([
+        this._get('/api/browser/machines'),
+        this._get('/api/browser/articles?all=1'),
+      ]);
+      if (results[0].status === 'fulfilled') this.allMachines       = results[0].value.machines;
+      else this.showToast('Maschinen: ' + results[0].reason?.message, 'error');
+      if (results[1].status === 'fulfilled') this.allArticlesManage = results[1].value.articles;
+      else this.showToast('Artikel: ' + results[1].reason?.message, 'error');
+
+      if (this.isAdmin) {
+        try {
+          const [schedRes, cfgRes, pmRes] = await Promise.all([
+            this._get('/api/assignments/schedules'),
+            this._get('/api/browser/config'),
+            this._get('/api/browser/paymodes'),
+          ]);
+          this.schedules     = schedRes.schedules;
+          this.configEntries = cfgRes.config;
+          this.allPaymodes   = pmRes.paymodes;
+          await this.loadGoogleStatus();
+        } catch (err) {
+          this.showToast(err.message, 'error');
+        }
+      }
+    },
+
+    async savePaymode(pm) {
+      try {
+        await this._put(`/api/browser/paymodes/${pm.id}`, { konto_nr: pm.konto_nr || null });
+        this.showToast(`${pm.name} gespeichert`);
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async loadGoogleStatus() {
+      try {
+        const res = await this._get('/api/browser/google/status');
+        this.googleAuthorised = res.authorised;
+      } catch (_) {}
+    },
+
+    // ── Machines ──────────────────────────────────────────────────────────────
+    openNewMachine() {
+      this.editingMachine = null;
+      this.machineForm = { name: '', period: 60, min_periods: 1, min_price: '', price: '', konto_nr: '' };
+      this.machineModal = true;
+    },
+
+    openEditMachine(m) {
+      this.editingMachine = m;
+      this.machineForm = {
+        name: m.name, period: m.period, min_periods: m.min_periods,
+        min_price: m.min_price || '', price: m.price, konto_nr: m.konto_nr || '', active: m.active,
+      };
+      this.machineModal = true;
+    },
+
+    async saveMachine() {
+      const { name, period, min_periods, min_price, price, konto_nr } = this.machineForm;
+      if (!name || !period || !price) return this.showToast('Name, Periode und Preis erforderlich', 'error');
+      const body = { name, period: +period, min_periods: +min_periods, min_price: min_price || null, price: +price, konto_nr: konto_nr || null };
+      try {
+        if (this.editingMachine) {
+          await this._put('/api/browser/machines/' + this.editingMachine.id, { ...body, active: this.machineForm.active ?? 1 });
+          Object.assign(this.editingMachine, body);
+        } else {
+          const res = await this._post('/api/browser/machines', body);
+          this.allMachines.push({ ...body, id: res.id, active: 1 });
+          this.allMachines.sort((a,b) => a.name.localeCompare(b.name));
+        }
+        this.machineModal = false;
+        this.showToast('Maschine gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async toggleMachineActive(m) {
+      const active = m.active ? 0 : 1;
+      try {
+        await this._put('/api/browser/machines/' + m.id, {
+          name: m.name, period: m.period, min_periods: m.min_periods,
+          min_price: m.min_price || null, price: m.price, konto_nr: m.konto_nr || null, active,
+        });
+        m.active = active;
+        this.showToast(active ? 'Maschine aktiviert' : 'Maschine deaktiviert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    // ── Artikel ───────────────────────────────────────────────────────────────
+    openNewArticle() {
+      this.editingArticle = null;
+      this.articleForm    = { name: '', description: '', price: 0, is_balance_deposit: false };
+      this.articleModal   = true;
+    },
+    openEditArticle(a) {
+      this.editingArticle = a;
+      this.articleForm    = { name: a.name, description: a.description || '', price: a.price, konto_nr: a.konto_nr || '', is_balance_deposit: !!a.is_balance_deposit };
+      this.articleModal   = true;
+    },
+    async saveArticle() {
+      const body = {
+        name:               this.articleForm.name,
+        description:        this.articleForm.description || '',
+        price:              parseFloat(this.articleForm.price) || 0,
+        konto_nr:           this.articleForm.konto_nr || null,
+        is_balance_deposit: this.articleForm.is_balance_deposit ? 1 : 0,
+      };
+      try {
+        if (this.editingArticle) {
+          await this._put('/api/browser/articles/' + this.editingArticle.id, body);
+          Object.assign(this.editingArticle, { ...body, is_balance_deposit: body.is_balance_deposit });
+        } else {
+          const res = await this._post('/api/browser/articles', body);
+          this.allArticlesManage.push({ id: res.id, ...body, active: 1 });
+        }
+        this.articleModal = false;
+        this.showToast('Artikel gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+    async toggleArticleActive(a) {
+      try {
+        const res = await fetch('/api/browser/articles/' + a.id + '/toggle', {
+          method: 'PATCH', headers: { 'Authorization': 'Bearer ' + this.token },
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        a.active = data.active ? 1 : 0;
+        this.showToast(a.active ? 'Artikel aktiviert' : 'Artikel deaktiviert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    // ── Config ────────────────────────────────────────────────────────────────
+    async saveConfig(entry) {
+      try {
+        await this._put('/api/browser/config/' + encodeURIComponent(entry.key), { value: entry.value });
+        this.showToast(entry.key + ' gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    getSchedule(weekday) {
+      return this.schedules.find(s => s.weekday === weekday) || null;
+    },
+
+    async updateScheduleTime(weekday, field, value) {
+      const sched = this.getSchedule(weekday);
+      const open_time  = field === 'open_time'  ? value : sched?.open_time?.slice(0,5);
+      const close_time = field === 'close_time' ? value : sched?.close_time?.slice(0,5);
+      if (!open_time || !close_time) return;
+      try {
+        await this._put('/api/assignments/schedules/' + weekday, { open_time, close_time });
+        const idx = this.schedules.findIndex(s => s.weekday === weekday);
+        if (idx >= 0) this.schedules[idx] = { ...this.schedules[idx], open_time, close_time };
+        this.showToast('Öffnungszeit gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async addScheduleDay(weekday) {
+      try {
+        await this._put('/api/assignments/schedules/' + weekday, { open_time: '13:00', close_time: '17:00' });
+        const res = await this._get('/api/assignments/schedules');
+        this.schedules = res.schedules;
+        this.showToast('Tag hinzugefügt');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async deleteScheduleDay(weekday) {
+      try {
+        await this._put('/api/assignments/schedules/' + weekday, {});
+        this.schedules = this.schedules.filter(s => s.weekday !== weekday);
+        this.showToast('Tag entfernt');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    // ── Profile ───────────────────────────────────────────────────────────────
+    async loadPreferences() {
+      try {
+        const res = await this._get('/api/assignments/preferences');
+        if (res.preferences) {
+          this.prefWeekday     = res.preferences.weekday != null ? String(res.preferences.weekday) : '';
+          this.prefPriority    = res.preferences.priority;
+          this.prefMaxPerMonth = res.preferences.max_per_month;
+        }
+      } catch (_) {}
+      try {
+        const res = await this._get('/api/auth/badge-login-status');
+        this.badgeLoginEnabled = !!res.badge_login_enabled;
+      } catch (_) {}
+    },
+
+    async changePassword() {
+      if (this.pwNew !== this.pwConfirm) {
+        return this.showToast('Passwörter stimmen nicht überein', 'error');
+      }
+      try {
+        await this._post('/api/browser/me/password', {
+          current_password: this.pwCurrent,
+          new_password:     this.pwNew,
+        });
+        this.pwCurrent = this.pwNew = this.pwConfirm = '';
+        this.showToast('Passwort erfolgreich geändert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async savePreferences() {
+      try {
+        await this._put('/api/assignments/preferences', {
+          weekday:       this.prefWeekday !== '' ? parseInt(this.prefWeekday) : null,
+          priority:      this.prefPriority,
+          max_per_month: this.prefMaxPerMonth,
+        });
+        this.showToast('Präferenzen gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    // ── Utils ─────────────────────────────────────────────────────────────────
+    showToast(msg, type = 'success') {
+      clearTimeout(this._toastTimer);
+      this.toast = { msg, type };
+      this._toastTimer = setTimeout(() => { this.toast = null; }, 3500);
+    },
+
+    fmtDuration(sec) {
+      if (sec == null) return '';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return `${h}h ${String(m).padStart(2,'0')}min`;
+      if (m > 0) return `${m}min ${String(s).padStart(2,'0')}s`;
+      return `${s}s`;
+    },
+
+    fmtRoundedDateTime(val) {
+      if (!val) return '–';
+      const d = new Date(String(val).replace(' ', 'T'));
+      if (isNaN(d)) return String(val);
+      if (d.getSeconds() >= 30) d.setMinutes(d.getMinutes() + 1);
+      d.setSeconds(0, 0);
+      return String(d.getDate()).padStart(2,'0') + '.' +
+        String(d.getMonth()+1).padStart(2,'0') + '.' +
+        String(d.getFullYear()).slice(2) + ' ' +
+        String(d.getHours()).padStart(2,'0') + ':' +
+        String(d.getMinutes()).padStart(2,'0');
+    },
+
+    fmtDate(val) {
+      if (!val) return '–';
+      const s = String(val).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const [y, m, d] = s.split('-');
+      return d + '.' + m + '.' + y;
+    },
+
+    fmtTime(val) {
+      if (!val) return '–';
+      return String(val).slice(0, 5);
+    },
+
+    _isoDate(d) {
+      return d.toISOString().slice(0, 10);
+    },
+
+    async _fetch(method, url, body, auth = true) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (auth && this.token) headers['Authorization'] = 'Bearer ' + this.token;
+      const opts = { method, headers };
+      if (body !== undefined) opts.body = JSON.stringify(body);
+      const res  = await fetch(url, opts);
+      if (res.status === 401 && auth) { this.logout(); throw new Error('Sitzung abgelaufen – bitte erneut anmelden'); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || data.error_code || 'HTTP ' + res.status);
+      return data;
+    },
+
+    async runWeblingSync() {
+      this.woblingSyncing    = true;
+      this.woblingSyncResult = '';
+      try {
+        const r = await this._post('/api/browser/webling/sync', {});
+        this.woblingSyncResult = `Fertig: +${r.inserted} neu, ~${r.updated} aktualisiert, ${r.skipped} übersprungen, ${r.errors} Fehler`;
+        this.showToast('Webling Sync abgeschlossen');
+        if (this.view === 'members') await this.loadMembers();
+      } catch (err) {
+        this.woblingSyncResult = 'Fehler: ' + err.message;
+        this.showToast(err.message, 'error');
+      } finally {
+        this.woblingSyncing = false;
+      }
+    },
+
+    openNewMember() {
+      this.newMember = { name: '', email: '', password: '', roles: ['member'] };
+      this.newMemberModal = true;
+    },
+
+    async createMember() {
+      const { name, email, password, roles } = this.newMember;
+      if (!name || !email || !password) return this.showToast('Alle Felder ausfüllen', 'error');
+      if (password.length < 8)          return this.showToast('Passwort min. 8 Zeichen', 'error');
+      if (roles.length === 0)           return this.showToast('Mindestens eine Rolle wählen', 'error');
+      try {
+        await this._post('/api/browser/members', { name, email, password, roles });
+        this.newMemberModal = false;
+        this.showToast(`${name} wurde erstellt`);
+        await this.loadMembers();
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    _get   (url)            { return this._fetch('GET',    url); },
+    _post  (url, body, auth = true) { return this._fetch('POST', url, body, auth); },
+    _put   (url, body)      { return this._fetch('PUT',    url, body); },
+    _patch (url, body)      { return this._fetch('PATCH',  url, body); },
+    _delete(url)            { return this._fetch('DELETE', url); },
+  };
+}
+</script>
+</body>
+</html>

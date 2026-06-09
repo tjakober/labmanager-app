@@ -1,0 +1,4 @@
+input/
+.migration_cache.json
+migration_log.json
+migration_errors.csv

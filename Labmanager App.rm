@@ -1,0 +1,32 @@
+| Modul | Status |
+|---|---|
+| Auth (Login, JWT, Rollen) | Fertig |
+| C – Controller-API (auth, log, rights, config, heartbeat) | Fertig |
+| B – Display Website (SSE, Kiosk) | Fertig |
+| D – Config-Tabelle (configService) | Fertig |
+| E – Guthaben-API (deposit/withdraw/balance) | Fertig |
+| F – Upgrades (revertExpiredUpgrades, History, Webling) | Fertig |
+| G – Migration (Zynex → Webling, 5 Phasen) | Fertig |
+| H – Webling-Sync (Mitglieder + webling_meta + Fachgruppen) | Fertig |
+| Abrechnung (billingService, PDF) | Fertig |
+| Google Calendar (calendarSync) | Fertig |
+| Mail (mailService, nodemailer) | Fertig |
+| Slack (slackService) | Fertig |
+| A – Einsatzplanung (Wochenplan, Zuweisung, Stellvertretung) | Fertig |
+| Browser API + SPA (members, tags, rights, invoices, knowledge, machines, config) | Fertig |
+| Tag-Depot (Ersatzkarte, Rückgabe, Pool) | Fertig |
+| Webling-Felder im Mitglied-Detail (Labmanager) | Fertig |
+| Passwort-Reset per E-Mail (Token, 2h, Einmalverwendung) | Fertig |
+| Webling-Sync: Rollen aus Funktion-Feld + Welcome-Mail | Fertig |
+| Badge-Login (RFID-Scan → JWT, mit Toggle) | Fertig |
+| Auto-Logout bei JWT-Ablauf (Timer-basiert, Bildschirm löschen) | Fertig |
+| Artikel-Verwaltung (articles, invoice_items, is_balance_deposit) | Fertig |
+| Rechnungs-Detail mit Maschine/Startzeit/Laufzeit/Betrag (SPA + PDF) | Fertig |
+| Rechnungs-Ergänzung (Artikel zu offener Rechnung hinzufügen) | Fertig |
+| Rechnungs-Storno, Zahlung nachbuchen | Fertig |
+| Paymodes-Verwaltung (konto_nr editierbar) | Fertig |
+| Self-Service: Passwort ändern, Profil | Fertig |
+| Rechte: Default-Laufzeit (heute + right.default_days) | Fertig |
+| Rights-Datumsanzeige Timezone-Fix (dateStrings: true) | Fertig |
+| Maschinenbelegung Live-View (Grid, grüner Punkt, Laufzeit, Heartbeat) | Fertig |
+| Auto-Select Mitglied bei Einzeltreffer (Tab beibehalten) | Fertig |

@@ -1,0 +1,17 @@
+node_modules
+.env
+.env.*
+!.env.example
+certs/
+logs/
+migration/input/
+migration/.migration_cache.json
+migration/zynex/.cache.json
+migration/migration_log.json
+migration/migration_errors.csv
+migration/zynex/migration_log.json
+migration/zynex/migration_errors.csv
+.claude/
+*.md
+.git/
+tmp_*.js

@@ -1,0 +1,24 @@
+{
+  "app": {
+    "title": "FabLab Winti"
+  },
+  "auth": {
+    "login":    "Anmelden",
+    "logout":   "Abmelden",
+    "email":    "E-Mail",
+    "password": "Passwort"
+  },
+  "roles": {
+    "admin":      "Administrator",
+    "labmanager": "Labmanager",
+    "member":     "Mitglied"
+  },
+  "errors": {
+    "INSUFFICIENT_BALANCE":  "Nicht genügend Guthaben",
+    "MAX_BALANCE_EXCEEDED":  "Maximales Guthaben würde überschritten",
+    "INVALID_ACCOUNT":       "Gegenkonto nicht erlaubt",
+    "MEMBER_NOT_FOUND":      "Mitglied nicht gefunden",
+    "MEMBER_INACTIVE":       "Mitglied ist nicht aktiv",
+    "WEBLING_ERROR":         "Fehler bei Webling-Buchung"
+  }
+}

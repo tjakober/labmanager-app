@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FabLab Winti – Einsatzplan</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: #fff;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #E8640A;
+      padding: 1.2vh 3vw;
+      display: flex;
+      align-items: center;
+      gap: 2vw;
+    }
+
+    header h1 { font-size: 3.5vh; font-weight: 700; }
+    header .clock { margin-left: auto; font-size: 3vh; opacity: 0.9; }
+
+    #schedule {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(28vw, 1fr));
+      gap: 2vh 2vw;
+      padding: 2vh 3vw;
+      overflow: hidden;
+    }
+
+    .card {
+      background: #1e1e1e;
+      border-radius: 1.5vh;
+      padding: 2.5vh 2vw;
+      display: flex;
+      flex-direction: column;
+      gap: 1vh;
+      border-left: 0.6vh solid #E8640A;
+    }
+
+    .card .date  { font-size: 2vh;   color: #aaa; }
+    .card .time  { font-size: 2.2vh; color: #E8640A; font-weight: 600; }
+    .card .name  { font-size: 3.5vh; font-weight: 700; }
+
+    .card img {
+      width: 8vh; height: 8vh;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 0.3vh solid #E8640A;
+    }
+
+    .card .skills {
+      display: flex; flex-wrap: wrap; gap: 0.8vh;
+    }
+    .card .skill {
+      background: #333;
+      border-radius: 99px;
+      padding: 0.4vh 1.2vh;
+      font-size: 1.6vh;
+      color: #ccc;
+    }
+
+    #no-schedule {
+      grid-column: 1/-1;
+      text-align: center;
+      padding: 10vh;
+      color: #555;
+      font-size: 3vh;
+    }
+
+    #sessions-bar {
+      background: #1a1a1a;
+      border-top: 0.3vh solid #333;
+      padding: 1vh 3vw;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5vw;
+      min-height: 6vh;
+      align-items: center;
+    }
+
+    .session-pill {
+      background: #2a2a2a;
+      border: 0.2vh solid #E8640A;
+      border-radius: 99px;
+      padding: 0.6vh 1.5vw;
+      font-size: 2vh;
+      display: flex;
+      align-items: center;
+      gap: 1vw;
+    }
+
+    .session-pill .pill-machine { color: #E8640A; font-weight: 700; }
+    .session-pill .pill-user    { color: #ccc; }
+    .session-pill .pill-timer   { color: #fff; font-variant-numeric: tabular-nums; min-width: 4.5ch; text-align: right; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🔧 FabLab Winti – Einsatzplan</h1>
+  <div class="clock" id="clock">--:--</div>
+</header>
+
+<div id="schedule"></div>
+<div id="sessions-bar"></div>
+
+<script>
+// ── Uhr ───────────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Einsatzplan rendern ───────────────────────────────────────────────────────
+function renderSchedule(assignments) {
+  const el = document.getElementById('schedule');
+
+  if (!assignments || assignments.length === 0) {
+    el.innerHTML = '<div id="no-schedule">Keine Einsätze geplant</div>';
+    return;
+  }
+
+  el.innerHTML = assignments.map(a => `
+    <div class="card">
+      <div class="date">${formatDate(a.date)}</div>
+      <div class="time">${a.start_time} – ${a.end_time}</div>
+      <div style="display:flex; align-items:center; gap:1.5vw">
+        ${a.photo_id
+          ? `<img src="/api/documents/${a.photo_id}" alt="${a.name}">`
+          : ''}
+        <div class="name">${a.name}</div>
+      </div>
+      <div class="skills">
+        ${(a.skills || []).map(s => `<span class="skill">${s}</span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function formatDate(d) {
+  return new Date(d).toLocaleDateString('de-CH', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+}
+
+// ── Initialer Laden ───────────────────────────────────────────────────────────
+async function loadSchedule() {
+  const n = new URLSearchParams(location.search).get('n') || 5;
+  const res = await fetch(`/api/display/schedule?n=${n}`);
+  const data = await res.json();
+  renderSchedule(data.assignments);
+}
+loadSchedule();
+
+// ── Aktive Maschinennutzung ───────────────────────────────────────────────────
+const sessions = new Map(); // machineId → { machineName, userName, loginAt }
+
+function fmtElapsed(loginAt) {
+  const sec = Math.floor((Date.now() - loginAt) / 1000);
+  const h   = Math.floor(sec / 3600);
+  const m   = Math.floor((sec % 3600) / 60);
+  const s   = sec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function renderSessions() {
+  const bar = document.getElementById('sessions-bar');
+  if (sessions.size === 0) { bar.innerHTML = ''; return; }
+  bar.innerHTML = Array.from(sessions.values()).map(s => `
+    <div class="session-pill" data-mid="${s.machineId}">
+      <span class="pill-machine">${s.machineName}</span>
+      <span class="pill-user">${s.userName}</span>
+      <span class="pill-timer" id="timer-${s.machineId}">${fmtElapsed(s.loginAt)}</span>
+    </div>
+  `).join('');
+}
+
+setInterval(() => {
+  for (const s of sessions.values()) {
+    const el = document.getElementById('timer-' + s.machineId);
+    if (el) el.textContent = fmtElapsed(s.loginAt);
+  }
+}, 1000);
+
+async function loadSessions() {
+  const res  = await fetch('/api/display/sessions');
+  const data = await res.json();
+  sessions.clear();
+  for (const s of data.sessions) sessions.set(s.machineId, s);
+  renderSessions();
+}
+loadSessions();
+
+// ── SSE: Echtzeit-Updates ─────────────────────────────────────────────────────
+const es = new EventSource('/api/display/events');
+es.onmessage = e => {
+  const data = JSON.parse(e.data);
+  if (data.assignments)  renderSchedule(data.assignments);
+  if (data.session_start) {
+    sessions.set(data.session_start.machineId, data.session_start);
+    renderSessions();
+  }
+  if (data.session_end) {
+    sessions.delete(data.session_end.machineId);
+    renderSessions();
+  }
+};
+es.onerror = () => {
+  setTimeout(() => { loadSchedule(); loadSessions(); }, 10000);
+};
+</script>
+</body>
+</html>
