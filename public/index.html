@@ -28,9 +28,9 @@
     </div>
 
     <!-- Login-Formular -->
-    <form x-show="loginView === 'login'" @submit.prevent="login">
+    <form x-show="loginView === 'login'" @submit.prevent="login" autocomplete="off">
       <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail oder Badge-UID</label>
-      <input x-model="loginEmail" type="text" required autocomplete="username"
+      <input x-model="loginEmail" type="text" required autocomplete="off"
         @input="loginError = ''; badgeNeedsPassword = false"
         :class="loginEmail && !/^\d+$/.test(loginEmail) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail) ? 'border-amber-400' : ''"
         class="w-full border rounded-lg px-3 py-2 text-sm mb-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -40,7 +40,7 @@
       <div x-show="!/^\d+$/.test(loginEmail) || badgeNeedsPassword">
         <label class="block text-xs font-medium text-gray-600 mb-1">Passwort</label>
         <div class="relative mb-4">
-          <input x-model="loginPassword" :type="showPw ? 'text' : 'password'" autocomplete="current-password"
+          <input x-model="loginPassword" :type="showPw ? 'text' : 'password'" autocomplete="off"
             class="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
           <button type="button" @click="showPw=!showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
             <span x-text="showPw ? '🙈' : '👁'"></span>
