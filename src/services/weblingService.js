@@ -17,7 +17,7 @@ function client() {
     baseURL: cfg.webling.apiUrl,
     params:  { apikey: cfg.webling.apiKey },
     headers: { 'Content-Type': 'application/json' },
-    timeout: 10_000,
+    timeout: 30_000,
   });
 }
 

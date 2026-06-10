@@ -12,7 +12,7 @@ Node.js/Express backend für Mitgliederverwaltung, Maschinenabrechnung, RFID-Zug
 - **Benachrichtigungen:** nodemailer (SMTP)
 - **Sonstiges:** node-cron · pdfkit · axios · mariadb@3.3.1 (CJS-kompatibel, `dateStrings: true`)
 - **Frontend:** Alpine.js v3 + Tailwind CSS v3 (CDN, kein Build-Schritt)
-- **Infra:** Docker + Docker Compose (Produktion: Synology NAS)
+- **Infra:** Docker + Docker Compose (Produktion: Raspberry Pi / Synology NAS)
 
 ## Verzeichnisstruktur
 
@@ -72,8 +72,8 @@ migration/
   config.js                 Quell-DB (Zynex MSSQL) + Ziel-DB + Webling
   input/zynex/              CSV-Dateien: adressen.csv, gruppen.csv, adr_gruppen.csv,
                             adresstypen.csv, upgrades.csv
-Dockerfile                  Production Build (node:20-alpine, bcrypt native)
-docker-compose.yml          MariaDB 11 + App, persistente Volumes
+Dockerfile                  Production Build (node:20-slim, bcrypt Prebuilds)
+docker-compose.yml          MariaDB 10.11 + App, persistente Volumes, Port 3308 exponiert
 .env.example                Vorlage für Produktions-Konfiguration
 DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 ```
@@ -139,9 +139,11 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | `upgrade.notify_emails` | json | `[]` | Empfänger Upgrade-Meldungen |
 | `webling.active_statuses` | json | `[]` | Wildcard-Patterns für aktive Mitglieds-Statuses (z.B. `["Mitglied*"]`). Leer = alle |
 | `webling.fachgruppe_roles` | json | `{"LabManager":"labmanager","ICT":"admin"}` | Fachgruppe → lokale Rolle |
-| `webling.auto_calc_months` | boolean | `true` | Automatische Monats-Berechnung |
+| `webling.auto_calc_months` | boolean | `true` | Automatische Berechnung exmember_months (live von Webling) |
 | `webling.max_members` | number | `500` | Max. Mitglieder in Webling |
 | `webling.reserve` | number | `20` | Reserve unter Maximum |
+| `webling.exmember_months` | number | `0` | Monate Ex-Mitglieder in Webling behalten (auto-berechnet) |
+| `webling.member_group_id` | number | `0` | Webling membergroup-ID für neue Mitglieder beim Push |
 
 ## Webling Buchungs-Integration
 
@@ -173,9 +175,13 @@ Eintrags-Typen (`_typ`):
 
 `weblingSync.runSync()` — täglich 02:00 UTC + manuell auslösbar:
 
-**Phase 1:** Mitglieder-Upsert, `webling_meta`-Backup, lokale Upgrades + Membership-Events schreiben
+**Phase 1:** Mitglieder-Upsert (Webling → DB), `webling_meta`-Backup, lokale Upgrades + Membership-Events schreiben
 
-**Phase 2:** Fachgruppen-Sync — inaktive Mitglieder (Status nicht in `webling.active_statuses`) werden aus Webling-Fachgruppen entfernt; Rollen via `webling.fachgruppe_roles` synchronisiert
+**Phase 2:** Fachgruppen-Sync — inaktive Mitglieder werden aus Webling-Fachgruppen entfernt; Rollen via `webling.fachgruppe_roles` synchronisiert
+
+**Phase 3:** Push DB → Webling — lokale User mit `zynex_id` ohne `webling_id` die aktiv oder ausgeschlossen sind werden in Webling angelegt. Falls Webling voll: älteste Ex-Mitglieder werden zuerst gelöscht (404 = bereits gelöscht → bereinige webling_id; 409 = hat Buchungen → bleibt). Zählung live von Webling API, nicht aus lokaler DB.
+
+**calcOptimalExmemberMonths:** live von Webling API — zählt Ex-Mitglieder nach Monaten seit Austritt, berechnet Maximum das in verfügbare Plätze passt.
 
 **Rollen:** Ausschliesslich via Fachgruppen (kein Funktion-Feld mehr)
 
@@ -222,19 +228,34 @@ Neuer Labmanager: In Webling zur Fachgruppe hinzufügen → nächster Sync setzt
 ## Docker / Deployment
 
 **Dateien:**
-- `Dockerfile` — Production Build (node:20-alpine, bcrypt native)
-- `docker-compose.yml` — MariaDB 11 + App, Volumes: db_data, certs, logs, migration/input
+- `Dockerfile` — Production Build (node:20-slim, bcrypt Prebuilds)
+- `docker-compose.yml` — MariaDB 10.11 + App, Volumes: db_data, certs, logs, migration/input; Port 3308 exponiert
 - `.env.example` — Vorlage (ohne Secrets)
 - `db/schema.sql` — vollständiges DB-Schema für First-Start
 - `DEPLOY-SYNOLOGY.md` — Schritt-für-Schritt für Synology NAS
 
-**Synology NAS Start:**
+**Raspberry Pi / Synology NAS Start:**
 ```bash
 cp .env.example .env && nano .env
-docker compose up -d
+sudo docker compose up -d
 ```
 
 Beim ersten Start: MariaDB initialisiert Schema + Config-Seeds automatisch.
+
+**Passwörter mit Sonderzeichen ($) in .env:** `$`-Zeichen mit `\$` escapen, sonst wird der Wert abgeschnitten.
+
+**Git-Workflow (Raspi Update):**
+```bash
+# Lokal:
+git add . && git commit -m "..." && git push
+
+# Auf Raspi:
+cd ~/Docker/FabLabWinti
+git pull origin main
+sudo docker compose up -d --build app
+```
+
+**DB-Zugriff von aussen:** Port 3308 exponiert. Root-Zugriff via `sudo docker exec -it fablabwinti_db bash -c "mariadb -u root -pPASSWORD"`. Für Remote-Zugriff: `GRANT ALL ON db.* TO 'user'@'%' IDENTIFIED BY '...'`.
 
 ## API-Routen
 
@@ -253,6 +274,7 @@ Beim ersten Start: MariaDB initialisiert Schema + Config-Seeds automatisch.
 |---|---|---|
 | `GET /me` | JWT | Eigenes User-Objekt |
 | `POST /me/password` | JWT | Eigenes Passwort ändern |
+| `GET /members/summary` | labmanager | Mitglieder-Statistik: total, in_webling, by_status |
 | `GET /members` | labmanager | Mitgliederliste; 1 Treffer → Auto-Select |
 | `POST /members` | admin | Neues Mitglied |
 | `GET /members/:id` | owner/labmanager | Mitglied-Detail (inkl. mitglieder_id aus Webling) |
@@ -353,7 +375,10 @@ C:\wamp64_3_3_5\bin\mysql\mysql8.3.0\bin\mysqld.exe --defaults-file="C:\wamp64_3
 | Maschinenbelegung Live-View | Fertig |
 | Member-Dashboard (Mein Konto) | Fertig |
 | Zynex Datenübernahme + membership_status + webling_meta simuliert | Fertig |
-| Docker-Deployment (Synology NAS) | Fertig |
+| Docker-Deployment (Synology NAS / Raspberry Pi) | Fertig |
+| Mitglieder-Übersicht Dashboard (Summary ohne Auswahl) | Fertig |
+| Webling-Sync Phase 3: Push DB→Webling (aktive + Ausgeschlossene + Ex-Mitglieder) | Fertig |
+| Webling-Kapazitätsmanagement (live Zählung, auto exmember_months, älteste löschen) | Fertig |
 
 ## Datenbankschema anwenden
 

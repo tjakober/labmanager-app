@@ -108,6 +108,16 @@ module.exports = {
 
   // ── Webling Sync (Modul H) ─────────────────────────────────────────────────
 
+  getMembersToCreateInWebling: `
+    SELECT id, name, email, membership_status, zynex_id
+    FROM users
+    WHERE webling_id IS NULL
+      AND zynex_id IS NOT NULL
+      AND (
+        membership_status IN (?)
+        OR membership_status = 'Ex-Mitglied'
+      )`,
+
   getMemberByWeblingId: `
     SELECT id FROM users WHERE webling_id = ?`,
 
@@ -164,6 +174,15 @@ module.exports = {
 
   removeUserKnowledge: `
     DELETE FROM user_knowledge WHERE user_id = ? AND knowledge_id = ?`,
+
+  getMembersSummary: `
+    SELECT
+      COALESCE(membership_status, '(kein Status)') AS status,
+      COUNT(*) AS total,
+      SUM(webling_id IS NOT NULL) AS in_webling
+    FROM users
+    GROUP BY membership_status
+    ORDER BY total DESC`,
 
   getMembers: `
     SELECT u.id, u.name, u.email, u.active, u.webling_id,

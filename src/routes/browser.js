@@ -119,6 +119,27 @@ router.post('/members', requireRole('admin'), async (req, res) => {
 });
 
 /**
+ * GET /api/browser/members/summary
+ * Mitglieder-Statistik: Anzahl pro Status + davon in Webling
+ */
+router.get('/members/summary', requireRole('admin', 'labmanager'), async (req, res) => {
+  try {
+    const rows = await db.query(Q.getMembersSummary);
+    const by_status = rows.map(r => ({
+      status:     r.status,
+      total:      Number(r.total),
+      in_webling: Number(r.in_webling),
+    }));
+    const total     = by_status.reduce((s, r) => s + r.total,      0);
+    const inWebling = by_status.reduce((s, r) => s + r.in_webling, 0);
+    res.json({ total, in_webling: inWebling, by_status });
+  } catch (err) {
+    console.error('[browser/members/summary]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
  * GET /api/browser/members
  * Query: ?search=&role=&active=&limit=50&offset=0
  * Roles: admin, labmanager

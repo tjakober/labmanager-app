@@ -15,7 +15,8 @@ VALUES
   ('webling.max_members',         '500',             'number',  'Max. Mitglieder in Webling'),
   ('webling.reserve',             '20',              'number',  'Reserve unter Maximum'),
   ('webling.active_statuses',     '[]',              'json',    'Webling-Statuses die als aktive Mitglieder gelten (leer = alle)'),
-  ('webling.fachgruppe_roles',    '{"LabManager":"labmanager","ICT":"admin"}', 'json', 'Fachgruppen-Name → lokale Rolle')
+  ('webling.fachgruppe_roles',    '{"LabManager":"labmanager","ICT":"admin"}', 'json', 'Fachgruppen-Name → lokale Rolle'),
+  ('webling.member_group_id',     '0',               'number',  'Webling membergroup-ID für neue Mitglieder (0 = kein Parent)')
 ON DUPLICATE KEY UPDATE
   type        = VALUES(type),
   description = VALUES(description);
