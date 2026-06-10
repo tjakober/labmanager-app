@@ -64,6 +64,6 @@ Folgende Bereiche befinden sich im Admin-Bereich:
         Dient für die Zugangsdaten zum Google Kalender. Wird für die Einsatzplanung und das InfoDisplay verwendet.
 - **Profil**
     Im Profil-Bereich kann man sein Passwort ändern. 
-    Wer will, kann das Badge-Login aktivieren. Dann nann er an einem PC mit RFID-Leser sich ohne Passwort anmelden. Er stellt den Cursor ins Email Feld und hält den RFID-Tag über den Leser. Ist das Badge-Login nicht aktiviert, muss er das Passwort noch eingeben. Per Default ist das Badge-Login deaktiviert.
+    Wer will, kann das Badge-Login aktivieren. Dann kann er an einem PC mit RFID-Leser sich ohne Passwort anmelden. Er stellt den Cursor ins Email Feld und hält den RFID-Tag über den Leser. Ist das Badge-Login nicht aktiviert, muss er das Passwort noch eingeben. Per Default ist das Badge-Login deaktiviert.
     Einsatz-Präferenzen:
         Dies ist für die Labmanager-Einstzplanung gedacht. Zur Zeit noch nicht programmiert.
