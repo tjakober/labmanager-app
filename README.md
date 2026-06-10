@@ -15,7 +15,7 @@ docker compose up -d
 # 3. Datenbank-Schema initialisieren (beim ersten Start automatisch via db/init.sql)
 
 # 4. App aufrufen
-# http://localhost:3000
+# https://localhost:3003
 ```
 
 ## Entwicklung (ohne Docker)
