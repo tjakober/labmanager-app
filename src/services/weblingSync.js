@@ -109,23 +109,52 @@ async function runSync() {
       if (!isActiveMember) inactiveMembIds.push(weblingId);
 
       let localId, isNew = false;
+      const mitgliederId = props['Mitglieder ID'] != null ? Number(props['Mitglieder ID']) : null;
+
       const byWebling = await db.queryOne(Q.getMemberByWeblingId, [weblingId]);
       if (byWebling) {
-        await db.query(Q.updateMemberFromWebling, [name, email, weblingId]);
+        // Vor dem Update: Duplikat ohne zynex_id mit gleicher E-Mail entfernen
+        const emailConflict = email ? await db.queryOne(
+          'SELECT id, zynex_id, email FROM users WHERE email = ? AND id != ?', [email, byWebling.id]
+        ) : null;
+        if (emailConflict) {
+          if (!emailConflict.zynex_id) {
+            // Duplikat ist ein lokaler User ohne Webling/Zynex-Verknüpfung → löschen
+            await db.query('DELETE FROM user_roles WHERE user_id = ?', [emailConflict.id]);
+            await db.query('DELETE FROM users WHERE id = ? AND zynex_id IS NULL', [emailConflict.id]);
+            _warn(`[weblingSync] ID ${weblingId}: Duplikat-User #${emailConflict.id} (${email}, ohne zynex_id) entfernt`);
+          } else {
+            _warn(`[weblingSync] ID ${weblingId}: E-Mail-Konflikt ${email} mit User #${emailConflict.id} (zynex_id=${emailConflict.zynex_id}) — E-Mail nicht überschrieben`);
+          }
+        }
+        // Bei echtem Konflikt (anderer User mit zynex_id hat dieselbe Mail): aktuelle DB-Email behalten
+        const currentUser = await db.queryOne('SELECT email FROM users WHERE id = ?', [byWebling.id]);
+        const newEmail = (emailConflict && emailConflict.zynex_id) ? currentUser.email : email;
+        await db.query(Q.updateMemberFromWebling, [name, newEmail, weblingId]);
         localId = byWebling.id;
         stats.updated++;
       } else {
-        const byEmail = await db.queryOne(Q.getMemberByEmail, [email]);
-        if (byEmail) {
-          await db.query(Q.linkMemberWebling, [name, weblingId, byEmail.id]);
-          localId = byEmail.id;
+        // Mitglieder ID (= zynex_id) ist die stabile Verknüpfung
+        const byZynex = mitgliederId
+          ? await db.queryOne('SELECT id FROM users WHERE zynex_id = ?', [mitgliederId])
+          : null;
+        if (byZynex) {
+          await db.query(Q.linkMemberWebling, [name, weblingId, byZynex.id]);
+          localId = byZynex.id;
           stats.updated++;
         } else {
-          const result = await db.query(Q.insertMemberFromWebling, [weblingId, name, email]);
-          localId = Number(result.insertId);
-          await db.query(Q.insertMemberRole, [localId, 'member']);
-          stats.inserted++;
-          isNew = true;
+          const byEmail = await db.queryOne(Q.getMemberByEmail, [email]);
+          if (byEmail) {
+            await db.query(Q.linkMemberWebling, [name, weblingId, byEmail.id]);
+            localId = byEmail.id;
+            stats.updated++;
+          } else {
+            const result = await db.query(Q.insertMemberFromWebling, [weblingId, name, email]);
+            localId = Number(result.insertId);
+            await db.query(Q.insertMemberRole, [localId, 'member']);
+            stats.inserted++;
+            isNew = true;
+          }
         }
       }
 
@@ -167,17 +196,6 @@ async function runSync() {
   } catch (err) {
     _err(`[weblingSync] Fachgruppen-Sync fehlgeschlagen: ${err.message}`);
   }
-
-  // ── Phase 3: Lokale Mitglieder → Webling (Push) ───────────────────────────
-  try {
-    const pushed = await pushMissingToWebling(activePatterns);
-    stats.inserted += pushed;
-  } catch (err) {
-    _err(`[weblingSync] Push-Phase fehlgeschlagen: ${err.message}`);
-  }
-
-  const autoCalc = await configService.get('webling.auto_calc_months');
-  if (autoCalc) await calcOptimalExmemberMonths(weblingIds);
 
   _log(
     `[weblingSync] ✓ SYNC ABGESCHLOSSEN: ` +
@@ -296,213 +314,6 @@ async function syncFachgruppen(weblingToLocal, inactiveMembIds, fgRoleMap) {
         _log(`[weblingSync] ${uname}: Rolle '${role}' entfernt (nicht mehr in Fachgruppe)`);
       }
     }
-  }
-}
-
-async function _pushMember(u, memberGroupId) {
-  const props = { 'E-Mail P': u.email };
-  const nameParts = (u.name || '').trim().split(' ');
-  props['Vorname'] = nameParts.slice(0, -1).join(' ') || u.name;
-  props['Name']    = nameParts.slice(-1)[0] || '';
-
-  const payload = { properties: props };
-  if (memberGroupId) payload.parents = [Number(memberGroupId)];
-
-  const { data: newId } = await weblingService._client().post('/member', payload);
-  const weblingId = typeof newId === 'number' ? newId : Number(newId);
-  await db.query('UPDATE users SET webling_id = ?, active = 1 WHERE id = ?', [weblingId, u.id]);
-  await _sleep(DELAY_MS);
-  return weblingId;
-}
-
-async function pushMissingToWebling(activePatterns) {
-  const [maxMembers, reserve, exmemberMonths, memberGroupId] = await Promise.all([
-    configService.get('webling.max_members'),
-    configService.get('webling.reserve'),
-    configService.get('webling.exmember_months'),
-    configService.get('webling.member_group_id'),
-  ]);
-
-  const capacity = (maxMembers || 500) - (reserve || 0);
-
-  // Wieviele sind bereits in Webling (live von Webling API, nicht lokale DB)
-  const { data: listData } = await weblingService._client().get('/member');
-  let inWebling = (listData.objects || []).length;
-
-  // ── Schritt 1: Aktive ohne webling_id ermitteln ────────────────────────────
-  const activeCandidates = await db.query(
-    `SELECT id, name, email, membership_status, zynex_id
-     FROM users
-     WHERE webling_id IS NULL AND zynex_id IS NOT NULL AND email IS NOT NULL`
-  );
-  const toActivePush = activeCandidates.filter(u => {
-    const s = (u.membership_status || '').toLowerCase();
-    if (s === 'ex-mitglied') return false;
-    return s === 'ausgeschlossen' || activePatterns.length === 0 || activePatterns.some(p => p.test(s));
-  });
-
-  // ── Schritt 2: Falls nicht genug Platz → Ex-Mitglieder aus Webling löschen ─
-  const needed = toActivePush.length;
-  const available = capacity - inWebling;
-
-  if (available < needed) {
-    const toFree = needed - available;
-    _log(`[weblingSync] Phase 3: Brauche ${needed} Plätze, verfügbar ${available} → lösche ${toFree} Ex-Mitglieder aus Webling`);
-
-    // Ex-Mitglieder in Webling, älteste zuerst (nach Austrittsdatum)
-    const exInWebling = await db.query(
-      `SELECT id, name, webling_id, webling_meta
-       FROM users
-       WHERE webling_id IS NOT NULL AND membership_status = 'Ex-Mitglied'
-       ORDER BY id ASC`
-    );
-
-    // Sortieren nach Austrittsdatum aufsteigend (älteste zuerst)
-    exInWebling.sort((a, b) => {
-      const dateA = _getAustrittsdatum(a.webling_meta);
-      const dateB = _getAustrittsdatum(b.webling_meta);
-      return (dateA || '').localeCompare(dateB || '');
-    });
-
-    let freed = 0;
-    for (const ex of exInWebling) {
-      if (freed >= toFree) break;
-      try {
-        await weblingService._client().delete(`/member/${ex.webling_id}`);
-        _log(`[weblingSync] Ex-Mitglied «${ex.name}» aus Webling gelöscht (Platz schaffen)`);
-        inWebling--;
-        freed++;
-      } catch (err) {
-        if (err.response?.status === 404) {
-          _log(`[weblingSync] Ex-Mitglied «${ex.name}» bereits gelöscht — bereinige webling_id`);
-          await db.query('UPDATE users SET webling_id = NULL WHERE id = ?', [ex.id]);
-          inWebling--;
-          freed++;
-        } else if (err.response?.status === 409) {
-          _warn(`[weblingSync] Ex-Mitglied «${ex.name}» hat Buchungen in Webling — wird behalten`);
-        } else {
-          _warn(`[weblingSync] Löschen fehlgeschlagen für «${ex.name}»: ${err.message}`);
-        }
-      }
-    }
-  }
-
-  // ── Schritt 3: Aktive pushen ───────────────────────────────────────────────
-  let pushed = 0;
-  for (const u of toActivePush) {
-    if (inWebling >= capacity) {
-      _warn(`[weblingSync] Webling voll (${inWebling}/${capacity}) — «${u.name}» nicht gepusht`);
-      continue;
-    }
-    try {
-      const weblingId = await _pushMember(u, memberGroupId);
-      _log(`[weblingSync] Push aktiv: «${u.name}» → Webling ${weblingId} [${u.membership_status}]`);
-      inWebling++;
-      pushed++;
-    } catch (err) {
-      _warn(`[weblingSync] Push fehlgeschlagen für «${u.name}» (${u.email}): ${err.message}`);
-    }
-  }
-
-  // ── Schritt 4: Ex-Mitglieder in verbleibenden Platz pushen ────────────────
-  if (exmemberMonths > 0) {
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - exmemberMonths);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-
-    const exCandidates = await db.query(
-      `SELECT id, name, email, membership_status, zynex_id, webling_meta
-       FROM users
-       WHERE webling_id IS NULL AND zynex_id IS NOT NULL AND email IS NOT NULL
-         AND membership_status = 'Ex-Mitglied'`
-    );
-
-    // Jüngste zuerst
-    exCandidates.sort((a, b) => {
-      const dateA = _getAustrittsdatum(a.webling_meta);
-      const dateB = _getAustrittsdatum(b.webling_meta);
-      return (dateB || '').localeCompare(dateA || '');
-    });
-
-    for (const u of exCandidates) {
-      if (inWebling >= capacity) break;
-      const austrittsdatum = _getAustrittsdatum(u.webling_meta);
-      if (austrittsdatum && austrittsdatum < cutoffStr) continue;
-      try {
-        const weblingId = await _pushMember(u, memberGroupId);
-        _log(`[weblingSync] Push Ex-Mitglied: «${u.name}» → Webling ${weblingId}`);
-        inWebling++;
-        pushed++;
-      } catch (err) {
-        _warn(`[weblingSync] Push Ex-Mitglied fehlgeschlagen für «${u.name}»: ${err.message}`);
-      }
-    }
-  }
-
-  _log(`[weblingSync] Phase 3: ${pushed} gepusht, ${inWebling}/${capacity} Webling-Plätze belegt`);
-  return pushed;
-}
-
-function _getAustrittsdatum(weblingMeta) {
-  try {
-    const meta  = typeof weblingMeta === 'string' ? JSON.parse(weblingMeta) : weblingMeta;
-    const props = meta?.properties || {};
-    return props['Austrittsdatum'] || props['Mitglied bis'] || null;
-  } catch (_) { return null; }
-}
-
-async function calcOptimalExmemberMonths(weblingIds) {
-  const [maxMembers, reserve, configured] = await Promise.all([
-    configService.get('webling.max_members'),
-    configService.get('webling.reserve'),
-    configService.get('webling.exmember_months'),
-  ]);
-
-  const capacity        = (maxMembers || 500) - (reserve || 0);
-  const totalInWebling  = weblingIds.length;
-  const available       = capacity - totalInWebling;
-
-  // Ex-Mitglieder in Webling: Austrittsdatum live aus Webling holen
-  const activeStatuses  = await configService.get('webling.active_statuses') || [];
-  const activePatterns  = activeStatuses.map(s =>
-    new RegExp('^' + s.toLowerCase().replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
-  );
-  const isActiveStatus  = s => activePatterns.length === 0 || activePatterns.some(p => p.test((s||'').toLowerCase()));
-
-  const now = Date.now();
-  const byMonth = {};
-
-  for (const wid of weblingIds) {
-    try {
-      const member = await weblingService.getMember(wid);
-      const props  = member?.properties || {};
-      const status = (props['Status'] || '').toLowerCase();
-      if (isActiveStatus(status) || status === 'ausgeschlossen') continue;
-
-      const until = props['Austrittsdatum'] || props['Mitglied bis'];
-      if (!until) continue;
-      const monthsAgo = Math.floor((now - new Date(until).getTime()) / (1000 * 60 * 60 * 24 * 30));
-      if (monthsAgo < 0) continue;
-      byMonth[monthsAgo] = (byMonth[monthsAgo] || 0) + 1;
-      await _sleep(50);
-    } catch (_) {}
-  }
-
-  // Maximum: so viele Monate wie möglich, solange Platzbedarf <= available
-  let sum = 0, optimalMonths = 0;
-  for (const mo of Object.keys(byMonth).map(Number).sort((a, b) => a - b)) {
-    if (sum + byMonth[mo] > available) break;
-    sum += byMonth[mo];
-    optimalMonths = mo;
-  }
-
-  if (optimalMonths !== configured) {
-    await configService.set('webling.exmember_months', optimalMonths);
-    _log(`[weblingSync] exmember_months: ${configured} → ${optimalMonths} (Kapazität: ${capacity}, belegt: ${totalInWebling}, Ex-Mitglieder: ${sum})`);
-    await mailService.sendWeblingAutoAdjust({ oldMonths: configured, newMonths: optimalMonths,
-      occupation: totalInWebling, maxMembers }).catch(() => {});
-  } else {
-    _log(`[weblingSync] exmember_months: ${configured} unverändert (verfügbar: ${available}, Ex-Mitglieder: ${sum})`);
   }
 }
 
