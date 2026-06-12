@@ -139,11 +139,8 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | `upgrade.notify_emails` | json | `[]` | Empfänger Upgrade-Meldungen |
 | `webling.active_statuses` | json | `[]` | Wildcard-Patterns für aktive Mitglieds-Statuses (z.B. `["Mitglied*"]`). Leer = alle |
 | `webling.fachgruppe_roles` | json | `{"LabManager":"labmanager","ICT":"admin"}` | Fachgruppe → lokale Rolle |
-| `webling.auto_calc_months` | boolean | `true` | Automatische Berechnung exmember_months (live von Webling) |
-| `webling.max_members` | number | `500` | Max. Mitglieder in Webling |
-| `webling.reserve` | number | `20` | Reserve unter Maximum |
-| `webling.exmember_months` | number | `0` | Monate Ex-Mitglieder in Webling behalten (auto-berechnet) |
-| `webling.member_group_id` | number | `0` | Webling membergroup-ID für neue Mitglieder beim Push |
+| `webling.max_members` | number | `500` | Max. Mitglieder in Webling (nur informativ) |
+| `webling.reserve` | number | `20` | Reserve unter Maximum (nur informativ) |
 
 ## Webling Buchungs-Integration
 
@@ -175,13 +172,11 @@ Eintrags-Typen (`_typ`):
 
 `weblingSync.runSync()` — täglich 02:00 UTC + manuell auslösbar:
 
-**Phase 1:** Mitglieder-Upsert (Webling → DB), `webling_meta`-Backup, lokale Upgrades + Membership-Events schreiben
+**Webling führt** — kein Push aus der App nach Webling. Neue Mitglieder werden ausschliesslich in Webling erfasst oder via Migration (`migration/zynex/run.js`) übernommen.
+
+**Phase 1:** Mitglieder-Upsert (Webling → DB), `webling_meta`-Backup, lokale Upgrades + Membership-Events schreiben. Match-Priorität: `webling_id` → `zynex_id` (= Webling `Mitglieder ID`) → E-Mail. Duplikat-User ohne `zynex_id` bei E-Mail-Konflikt werden gelöscht.
 
 **Phase 2:** Fachgruppen-Sync — inaktive Mitglieder werden aus Webling-Fachgruppen entfernt; Rollen via `webling.fachgruppe_roles` synchronisiert
-
-**Phase 3:** Push DB → Webling — lokale User mit `zynex_id` ohne `webling_id` die aktiv oder ausgeschlossen sind werden in Webling angelegt. Falls Webling voll: älteste Ex-Mitglieder werden zuerst gelöscht (404 = bereits gelöscht → bereinige webling_id; 409 = hat Buchungen → bleibt). Zählung live von Webling API, nicht aus lokaler DB.
-
-**calcOptimalExmemberMonths:** live von Webling API — zählt Ex-Mitglieder nach Monaten seit Austritt, berechnet Maximum das in verfügbare Plätze passt.
 
 **Rollen:** Ausschliesslich via Fachgruppen (kein Funktion-Feld mehr)
 
@@ -377,8 +372,7 @@ C:\wamp64_3_3_5\bin\mysql\mysql8.3.0\bin\mysqld.exe --defaults-file="C:\wamp64_3
 | Zynex Datenübernahme + membership_status + webling_meta simuliert | Fertig |
 | Docker-Deployment (Synology NAS / Raspberry Pi) | Fertig |
 | Mitglieder-Übersicht Dashboard (Summary ohne Auswahl) | Fertig |
-| Webling-Sync Phase 3: Push DB→Webling (aktive + Ausgeschlossene + Ex-Mitglieder) | Fertig |
-| Webling-Kapazitätsmanagement (live Zählung, auto exmember_months, älteste löschen) | Fertig |
+| Webling-Sync: nur Lesen (Webling führt, kein Push aus App) | Fertig |
 
 ## Datenbankschema anwenden
 
