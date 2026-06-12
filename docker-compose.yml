@@ -6,7 +6,6 @@
 #   2. SSL-Zertifikat in ./certs/ ablegen ODER Synology Reverse Proxy verwenden
 #   3. docker-compose up -d
 
-version: "3.3"
 
 services:
 
