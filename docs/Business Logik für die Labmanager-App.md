@@ -1,5 +1,19 @@
 # Business Logik für die Labmanager-App
 
+## Berechnung der Maschinen-Zeit
+Für die Berechnung der Maschinenzeit werden die Logs der Maschinen-Controller interpretietrt. Logins und Logouts von einem RFID-Tag  enthalten die Start- und Stop-Zeit  eines Mitglieds. Diese Zeiten werden zusammengezählt und gemäss der Einstellung in der Maschinen-Tabelle der Datenbank ausgewertet. Diese Interpretation erfolgt in Perioden von 15 Minuten. Dabei anfangs eine minimale Anzahl Perioden der Nutzung zu einem Normalpreis oder zu einem Spezialpreis berechnet. Danach wir die Zeit der angebrochen Perioden zum Normalpreis hinzugezählt. Dies ergibt die folgenden Berechnungsvorgang:
+
+für jede genutzte Maschine im Log-Zeitraum:
+nutzungszeit = logout_time - login_time (Minuten)
+wenn nutzungszeit <= min_periods * period:
+    preis = min_periods * (min_price ?? price)
+sonst:
+    preis = min_periods * (min_price ?? price)
+    + ceil((nutzungszeit - min_periods*period) / period) * price
+gesamtpreis += preis
+
+Mehrere Maschinen können gleichzeitig genutzt werden – jede wird separat berechnet
+
 ## Webling
 Mitglieder werden über Webling erfasst und die Zuteilung der Fachgruppen-Mitglieder erfolgt über Webling. Die Daten werden über den Webling-Sync in die Labmanager-App übertragen. Der Webling-Sync läuft täglich in der Nacht, kann aber von einem Admin auch manuell ausgelöst werden.
 1. Webling hat die führende Rolle.
@@ -67,3 +81,10 @@ Folgende Bereiche befinden sich im Admin-Bereich:
     Wer will, kann das Badge-Login aktivieren. Dann kann er an einem PC mit RFID-Leser sich ohne Passwort anmelden. Er stellt den Cursor ins Email Feld und hält den RFID-Tag über den Leser. Ist das Badge-Login nicht aktiviert, muss er das Passwort noch eingeben. Per Default ist das Badge-Login deaktiviert.
     Einsatz-Präferenzen:
         Dies ist für die Labmanager-Einstzplanung gedacht. Zur Zeit noch nicht programmiert.
+## Labmanager-Bereich
+    Der Labmanager-Bereich enthält nur den Mitgliederbereich, die Einsatzplanung, die Belegung sowie das Profil.
+## Mitglieder Bereich
+    Im Mitgliederbereich wir die Belegung der Maschinen angezeigt, die das Mitglied selber benutzt. Er kann dort auch die bereits aufgelaufene Zeit einsehen sowie deren Kosten.
+    Er kann ebenfalls seine Bezüge von Getränken und Material erfassen.
+    Im Menu Profil kann er sein Passwort ändern.
+    Adressänderungen sowie Mail und Telefon macht der Labmanager über Webling.
