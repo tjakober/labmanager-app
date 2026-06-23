@@ -910,7 +910,7 @@
                 <span class="font-medium" x-text="s.machine_name"></span>
               </div>
               <span class="text-gray-500 tabular-nums font-mono text-xs"
-                    x-text="fmtDuration(Math.max(0, Math.floor((_now - new Date(s.session_start.replace(' ','T')).getTime()) / 1000)))"></span>
+                    x-text="fmtDuration(Math.max(0, Math.floor((_now - new Date(s.session_start.replace(' ','T')+'Z').getTime()) / 1000)))"></span>
             </div>
           </template>
         </div>
@@ -2370,13 +2370,13 @@ function app() {
 
     machineElapsed(machine) {
       if (!machine.in_use || !machine.session_start) return null;
-      const startMs = new Date(String(machine.session_start).replace(' ', 'T')).getTime();
+      const startMs = new Date(String(machine.session_start).replace(' ', 'T') + 'Z').getTime();
       return Math.max(0, Math.floor((this._now - startMs) / 1000));
     },
 
     heartbeatAgo(machine) {
       if (!machine.last_heartbeat) return null;
-      const ms = this._now - new Date(String(machine.last_heartbeat).replace(' ', 'T')).getTime();
+      const ms = this._now - new Date(String(machine.last_heartbeat).replace(' ', 'T') + 'Z').getTime();
       const min = Math.floor(ms / 60000);
       if (min < 2)  return 'gerade eben';
       if (min < 60) return `vor ${min} min`;
