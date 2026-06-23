@@ -71,9 +71,10 @@ Folgende Bereiche befinden sich im Admin-Bereich:
         Hier kann der Webling-Sync manuell ausgelöst werden. Der Webling-Sync wird Nachts un 02:00 Uhr automatisch gestartet.
         Der Webling-Sync Synchronisiert die im Webling veränderten Adressen in die Datenbank auf dem Applikationsserver übertragen.
         Dabei werden zusätzlich folgende Manipulationen durchgeführt:
-        - Die Zugangsrechte für Administratoren der Labmanager-App werden für alle Mitglieder der ICT-Fachgruppe gewährleistet. Abgängern werden die Rechte entzogen.
+        - Die Zugangsrechte für Administratoren der Labmanager-App werden für alle Mitglieder der ICT-Fachgruppe gewährleistet. Abgängern der Gruppe werden die Rechte entzogen.
         - Die Zugangsrechte für Labmanager in der Labmanager-App werden für alle Mitglieder der Fachgruppe Labmanager gewährleistet. Abgängern werden die Rechte entzogen.
         - Die Upgrades werden in der Labmanager-App werden aktiviert und bei Ablauf deaktiviert sowie die Member-History aktualisiert. Dabei werden auch Änderungen im Status protokolliert. Alle Änderungen werden jeweils im Logfile logs/webling-sync.log eingetragen.
+
     - Google Kalender
         Dient für die Zugangsdaten zum Google Kalender. Wird für die Einsatzplanung und das InfoDisplay verwendet.
 - **Profil**
