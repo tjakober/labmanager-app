@@ -35,6 +35,11 @@ services:
     container_name: fablabwinti_app
     mem_limit: 256m
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "${APP_PORT:-3003}:3003"
     environment:
