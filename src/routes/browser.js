@@ -373,6 +373,7 @@ async function _pushMemberToWebling(member, status) {
   properties['Status']     = status || '';
   if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
 
+  console.log('[_pushMemberToWebling] webling_meta present:', !!member.webling_meta, 'properties keys:', Object.keys(properties));
   const memberGroupId = await configService.get('webling.member_group_id') || 0;
   let result;
   try {
