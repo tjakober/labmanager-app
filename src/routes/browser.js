@@ -273,6 +273,7 @@ router.get('/gift-accounts', async (req, res) => {
   }
   try {
     const rawAccounts = await configService.get('balance.gift_accounts');
+    console.log('[gift-accounts] raw:', JSON.stringify(rawAccounts), 'type:', typeof rawAccounts, 'isArray:', Array.isArray(rawAccounts));
     const allAccounts = Array.isArray(rawAccounts) ? rawAccounts : [];
     if (!allAccounts.length) return res.json({ accounts: [] });
 
