@@ -303,8 +303,21 @@ router.post('/members/:id/webling-push', async (req, res) => {
     if (!member) return res.status(404).json({ error: 'Mitglied nicht gefunden' });
 
     if (member.webling_id) {
-      // Bereits in Webling: nur Status aktualisieren
-      await weblingService.updateMemberFields(member.webling_id, { Status: member.membership_status || '' });
+      // Bereits in Webling: alle Felder aus webling_meta + aktuellen Status pushen
+      let properties = { Status: member.membership_status || '' };
+      if (member.webling_meta) {
+        try {
+          const meta = JSON.parse(member.webling_meta);
+          properties = { ...(meta.properties || {}), Status: member.membership_status || '' };
+        } catch { /* ignore */ }
+      }
+      console.log('[webling-push] webling_id:', member.webling_id, 'meta present:', !!member.webling_meta, 'keys:', Object.keys(properties));
+      try {
+        await weblingService.updateMemberFields(member.webling_id, properties);
+      } catch (err2) {
+        console.error('[webling-push] HTTP', err2.response?.status, JSON.stringify(err2.response?.data));
+        throw err2;
+      }
       res.json({ ok: true, action: 'updated', webling_id: member.webling_id });
     } else {
       // Neu anlegen
