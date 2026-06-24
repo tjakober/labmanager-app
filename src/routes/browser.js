@@ -308,10 +308,12 @@ router.post('/members/:id/webling-push', async (req, res) => {
       if (member.webling_meta) {
         try {
           const meta = JSON.parse(member.webling_meta);
-          properties = { ...(meta.properties || {}), Status: member.membership_status || '' };
+          const raw = meta.properties || {};
+          // Leere Strings weglassen (Webling lehnt leere Datumsfelder ab)
+          properties = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== '' && v != null));
+          properties.Status = member.membership_status || '';
         } catch { /* ignore */ }
       }
-      console.log('[webling-push] webling_id:', member.webling_id, 'meta present:', !!member.webling_meta, 'keys:', Object.keys(properties));
       try {
         await weblingService.updateMemberFields(member.webling_id, properties);
       } catch (err2) {
@@ -375,7 +377,8 @@ async function _pushMemberToWebling(member, status) {
   if (member.webling_meta) {
     try {
       const meta = JSON.parse(member.webling_meta);
-      properties = { ...(meta.properties || {}) };
+      const raw = meta.properties || {};
+      properties = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== '' && v != null));
     } catch { /* ignore */ }
   }
 
