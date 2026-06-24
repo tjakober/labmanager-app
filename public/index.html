@@ -219,9 +219,25 @@
               <!-- Webling fields: labmanager/admin only -->
               <template x-if="isLabmanager && selectedMember?.webling">
                 <div class="col-span-2 border-t pt-3 mt-1 space-y-2">
-                  <div x-show="selectedMember.webling.status">
+                  <div>
                     <dt class="text-xs text-gray-400 mb-0.5">Status</dt>
-                    <dd class="font-semibold text-blue-700" x-text="selectedMember.webling.status"></dd>
+                    <div x-show="!memberStatusEditing" class="flex items-center gap-2">
+                      <dd class="font-semibold"
+                        :class="(selectedMember.membership_status||'').toLowerCase().includes('ausgeschlossen') ? 'text-red-600' : 'text-blue-700'"
+                        x-text="selectedMember.membership_status || selectedMember.webling.status || '–'"></dd>
+                      <button @click="memberStatusEditing = true; memberStatusValue = selectedMember.membership_status || selectedMember.webling.status || ''"
+                        class="text-xs text-gray-400 hover:text-blue-600">&#9998;</button>
+                    </div>
+                    <div x-show="memberStatusEditing" class="flex gap-2 items-center">
+                      <input x-model="memberStatusValue" type="text"
+                        class="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        @keyup.enter="saveMemberStatus" @keyup.escape="memberStatusEditing = false">
+                      <button @click="saveMemberStatus" :disabled="memberStatusSaving"
+                        class="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-40">
+                        <span x-text="memberStatusSaving ? '…' : 'OK'"></span>
+                      </button>
+                      <button @click="memberStatusEditing = false" class="text-xs text-gray-400 hover:text-gray-600">&#x2715;</button>
+                    </div>
                   </div>
                   <div x-show="selectedMember.webling.strasse || selectedMember.webling.plz">
                     <dt class="text-xs text-gray-400 mb-0.5">Adresse</dt>
@@ -263,6 +279,15 @@
                   <div x-show="selectedMember.webling.bemerkungen">
                     <dt class="text-xs text-gray-400 mb-0.5">Bemerkungen</dt>
                     <dd class="text-gray-600 whitespace-pre-wrap" x-text="selectedMember.webling.bemerkungen"></dd>
+                  </div>
+                  <!-- Webling-Push Button -->
+                  <div class="pt-2 border-t">
+                    <button @click="pushMemberToWebling"
+                      :disabled="weblingPushSaving"
+                      class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-40 transition-colors">
+                      <span x-text="weblingPushSaving ? 'Wird übertragen…' : (selectedMember.webling_id ? 'Status → Webling aktualisieren' : 'Adresse zu Webling pushen')"
+                      ></span>
+                    </button>
                   </div>
                 </div>
               </template>
@@ -1860,6 +1885,10 @@ function app() {
     giftKontoNr: '',
     giftAmount: '',
     giftSaving: false,
+    memberStatusEditing: false,
+    memberStatusValue: '',
+    memberStatusSaving: false,
+    weblingPushSaving: false,
 
     // ── Assignments ───────────────────────────────────────────────────────────
     assignments: [],
@@ -2293,6 +2322,42 @@ function app() {
       } catch (err) {
         this.memberBalanceLoading = false;
         this.showToast(err.message, 'error');
+      }
+    },
+
+    async saveMemberStatus() {
+      const status = this.memberStatusValue.trim();
+      if (!status || this.memberStatusSaving) return;
+      this.memberStatusSaving = true;
+      try {
+        const res = await this._patch(
+          '/api/browser/members/' + this.selectedMember.id + '/status',
+          { status }
+        );
+        this.selectedMember.membership_status = res.membership_status;
+        this.memberStatusEditing = false;
+        const msg = res.pushed ? `Status gesetzt und zu Webling übertragen` : `Status gesetzt`;
+        this.showToast(msg);
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.memberStatusSaving = false;
+      }
+    },
+
+    async pushMemberToWebling() {
+      if (this.weblingPushSaving) return;
+      this.weblingPushSaving = true;
+      try {
+        const res = await this._post(
+          '/api/browser/members/' + this.selectedMember.id + '/webling-push', {}
+        );
+        if (res.webling_id) this.selectedMember.webling_id = res.webling_id;
+        this.showToast(res.action === 'created' ? 'Adresse zu Webling übertragen' : 'Webling-Status aktualisiert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.weblingPushSaving = false;
       }
     },
 

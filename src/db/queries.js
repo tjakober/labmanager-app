@@ -198,7 +198,7 @@ module.exports = {
     LIMIT :limit OFFSET :offset`,
 
   getMemberById: `
-    SELECT u.id, u.name, u.email, u.active, u.webling_id, u.webling_meta,
+    SELECT u.id, u.name, u.email, u.active, u.webling_id, u.webling_meta, u.membership_status, u.zynex_id,
            GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ',') AS roles
     FROM users u
     LEFT JOIN user_roles ur    ON ur.user_id = u.id
@@ -296,6 +296,9 @@ module.exports = {
 
   updateMemberPassword: `
     UPDATE users SET password_hash = ? WHERE id = ?`,
+
+  updateMemberStatus: `
+    UPDATE users SET membership_status = ? WHERE id = ?`,
 
   // ── Browser: Tags / Badges ─────────────────────────────────────────────────
 

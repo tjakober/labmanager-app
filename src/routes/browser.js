@@ -246,6 +246,125 @@ router.get('/members/:id', async (req, res) => {
 });
 
 /**
+ * PATCH /api/browser/members/:id/status
+ * Body: { status }
+ * Ändert membership_status lokal + Auto-Push zu Webling wenn Antrag oder Mitglied*.
+ */
+router.patch('/members/:id/status', async (req, res) => {
+  if (!req.user.roles.some(r => ['admin', 'labmanager'].includes(r))) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const id     = parseInt(req.params.id);
+  const status = (req.body.status || '').trim();
+  if (!status) return res.status(400).json({ error: 'Status erforderlich' });
+
+  try {
+    await db.query(Q.updateMemberStatus, [status, id]);
+
+    // Auto-Push zu Webling wenn Status Antrag oder Mitglied*
+    const member = await db.queryOne(Q.getMemberById, [id]);
+    let pushed = false;
+    const sl = status.toLowerCase();
+    const shouldPush = sl === 'antrag' || sl.startsWith('mitglied');
+    if (shouldPush && member.webling_id) {
+      await weblingService.updateMemberFields(member.webling_id, { Status: status });
+      await _appendMembershipHistory(member.webling_id, status);
+      pushed = true;
+    } else if (shouldPush && !member.webling_id) {
+      const newWeblingId = await _pushMemberToWebling(member, status);
+      if (newWeblingId) await _appendMembershipHistory(newWeblingId, status);
+      pushed = !!newWeblingId;
+    }
+
+    res.json({ ok: true, membership_status: status, pushed });
+  } catch (err) {
+    console.error('[browser/members/:id/status]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
+ * POST /api/browser/members/:id/webling-push
+ * Manueller Push der Adresse zu Webling (erstellt neuen Webling-Eintrag oder aktualisiert Status).
+ */
+router.post('/members/:id/webling-push', async (req, res) => {
+  if (!req.user.roles.some(r => ['admin', 'labmanager'].includes(r))) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const id = parseInt(req.params.id);
+  try {
+    const member = await db.queryOne(Q.getMemberById, [id]);
+    if (!member) return res.status(404).json({ error: 'Mitglied nicht gefunden' });
+
+    if (member.webling_id) {
+      // Bereits in Webling: nur Status aktualisieren
+      await weblingService.updateMemberFields(member.webling_id, { Status: member.membership_status || '' });
+      res.json({ ok: true, action: 'updated', webling_id: member.webling_id });
+    } else {
+      // Neu anlegen
+      const newWeblingId = await _pushMemberToWebling(member, member.membership_status);
+      res.json({ ok: true, action: 'created', webling_id: newWeblingId });
+    }
+  } catch (err) {
+    console.error('[browser/members/:id/webling-push]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
+ * Fügt einen Mitgliedschafts-Eintrag in die Webling Membership-History ein.
+ */
+async function _appendMembershipHistory(weblingId, status) {
+  try {
+    const wMember = await weblingService.getMember(weblingId);
+    const historyField = process.env.WEBLING_FIELD_UPGRADE_HISTORY || 'Membership-History';
+    const raw = wMember?.properties?.[historyField];
+    let history = [];
+    if (raw) { try { history = JSON.parse(raw); } catch {} }
+    if (!Array.isArray(history)) history = [];
+
+    const today = new Date().toISOString().slice(0, 10);
+    const sl = status.toLowerCase();
+    if (sl === 'antrag') {
+      history.push({ _typ: 'mitgliedschaft', bezeichnung: 'antrag', antragsDatum: today });
+    } else if (sl.startsWith('mitglied')) {
+      // Offenen Antrag-Eintrag ergänzen oder neuen anlegen
+      const open = [...history].reverse().find(e => e._typ === 'mitgliedschaft' && !e.eintrittsdatum && !e.kuendigDatum);
+      if (open) open.eintrittsdatum = today;
+      else history.push({ _typ: 'mitgliedschaft', bezeichnung: 'eintritt', eintrittsdatum: today });
+    }
+
+    await weblingService.updateUpgradeHistory(weblingId, history);
+  } catch (err) {
+    console.warn('[_appendMembershipHistory]', err.message);
+  }
+}
+
+/**
+ * Erstellt ein neues Webling-Mitglied aus lokalem User und setzt webling_id in DB.
+ */
+async function _pushMemberToWebling(member, status) {
+  const nameParts = (member.name || '').trim().split(/\s+/);
+  const vorname   = nameParts.slice(0, -1).join(' ') || nameParts[0] || '';
+  const nachname  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
+  const properties = {
+    Vorname:        vorname,
+    Name:           nachname,
+    'E-Mail P':     member.email || '',
+    Status:         status || '',
+  };
+  if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
+
+  const result    = await weblingService.createMember(properties);
+  const weblingId = typeof result === 'number' ? result : (result?.id ?? result);
+  if (weblingId) {
+    await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [weblingId, member.id]);
+  }
+  return weblingId;
+}
+
+/**
  * GET /api/browser/members/:id/balance
  */
 router.get('/members/:id/balance', async (req, res) => {
