@@ -357,12 +357,20 @@ async function _pushMemberToWebling(member, status) {
   const vorname   = nameParts.slice(0, -1).join(' ') || nameParts[0] || '';
   const nachname  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
 
-  const properties = {
-    Vorname:        vorname,
-    Name:           nachname,
-    'E-Mail P':     member.email || '',
-    Status:         status || '',
-  };
+  // Basis-Properties aus webling_meta übernehmen (enthält alle Webling-Felder vom letzten Sync)
+  let properties = {};
+  if (member.webling_meta) {
+    try {
+      const meta = JSON.parse(member.webling_meta);
+      properties = { ...(meta.properties || {}) };
+    } catch { /* ignore */ }
+  }
+
+  // Aktuelle Werte überschreiben
+  properties['Vorname']    = vorname;
+  properties['Name']       = nachname;
+  properties['E-Mail P']   = member.email || properties['E-Mail P'] || '';
+  properties['Status']     = status || '';
   if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
 
   const memberGroupId = await configService.get('webling.member_group_id') || 0;
