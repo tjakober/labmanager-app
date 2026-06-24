@@ -273,8 +273,9 @@ router.get('/gift-accounts', async (req, res) => {
   }
   try {
     const rawAccounts = await configService.get('balance.gift_accounts');
-    console.log('[gift-accounts] raw:', JSON.stringify(rawAccounts), 'type:', typeof rawAccounts, 'isArray:', Array.isArray(rawAccounts));
-    const allAccounts = Array.isArray(rawAccounts) ? rawAccounts : [];
+    let allAccounts = [];
+    if (Array.isArray(rawAccounts)) allAccounts = rawAccounts;
+    else if (typeof rawAccounts === 'string') { try { allAccounts = JSON.parse(rawAccounts); } catch {} }
     if (!allAccounts.length) return res.json({ accounts: [] });
 
     // Fachgruppen des eingeloggten Users laden
@@ -318,7 +319,9 @@ router.post('/members/:id/balance/gift', async (req, res) => {
   try {
     // Prüfen ob Konto erlaubt und User berechtigt
     const rawAccounts2 = await configService.get('balance.gift_accounts');
-    const allAccounts = Array.isArray(rawAccounts2) ? rawAccounts2 : [];
+    let allAccounts = [];
+    if (Array.isArray(rawAccounts2)) allAccounts = rawAccounts2;
+    else if (typeof rawAccounts2 === 'string') { try { allAccounts = JSON.parse(rawAccounts2); } catch {} }
     const account = allAccounts.find(a => a.konto_nr === String(konto_nr));
     if (!account) return res.status(400).json({ error: 'Konto nicht konfiguriert' });
 
