@@ -291,9 +291,9 @@ async function getAllMembers() {
   return data.objects || data;
 }
 
-async function createMember(properties, parentGroupId = null) {
+async function createMember(properties, parents = null) {
   const payload = { properties };
-  if (parentGroupId) payload.parents = [Number(parentGroupId)];
+  if (parents) payload.parents = Array.isArray(parents) ? parents : [Number(parents)];
   const { data } = await client().post('/member', payload);
   return data;
 }

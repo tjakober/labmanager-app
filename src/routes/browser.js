@@ -456,11 +456,22 @@ async function _appendMembershipHistory(weblingId, status) {
 async function _pushMemberToWebling(member, status) {
   const properties = _buildWeblingProperties(member, status);
 
-  console.log('[_pushMemberToWebling] webling_meta present:', !!member.webling_meta, 'properties keys:', Object.keys(properties));
-  const memberGroupId = await configService.get('webling.member_group_id') || 0;
+  // Parents: Haupt-Membergroup + Status-spezifische Untergruppe
+  const memberGroupId  = await configService.get('webling.member_group_id') || 0;
+  const statusGroups   = await configService.get('webling.status_groups') || {};
+  const rawStatusGroups = Array.isArray(statusGroups) ? {} :
+    (typeof statusGroups === 'string' ? (() => { try { return JSON.parse(statusGroups); } catch { return {}; } })() : statusGroups);
+  const parents = memberGroupId ? [Number(memberGroupId)] : [];
+  for (const [substring, groupId] of Object.entries(rawStatusGroups)) {
+    if (status && status.toLowerCase().includes(substring.toLowerCase())) {
+      parents.push(Number(groupId));
+      break;
+    }
+  }
+
   let result;
   try {
-    result = await weblingService.createMember(properties, memberGroupId || null);
+    result = await weblingService.createMember(properties, parents.length ? parents : null);
   } catch (err) {
     console.error('[_pushMemberToWebling] HTTP', err.response?.status, JSON.stringify(err.response?.data));
     throw err;
