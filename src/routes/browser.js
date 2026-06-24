@@ -302,7 +302,17 @@ router.post('/members/:id/webling-push', async (req, res) => {
     const member = await db.queryOne(Q.getMemberById, [id]);
     if (!member) return res.status(404).json({ error: 'Mitglied nicht gefunden' });
 
+    let weblingExists = false;
     if (member.webling_id) {
+      weblingExists = !!(await weblingService.getMember(member.webling_id).catch(() => null));
+      if (!weblingExists) {
+        // webling_id ist veraltet — zurücksetzen und neu anlegen
+        await db.query('UPDATE users SET webling_id = NULL WHERE id = ?', [id]);
+        member.webling_id = null;
+      }
+    }
+
+    if (weblingExists) {
       const properties = _buildWeblingProperties(member, member.membership_status);
       try {
         await weblingService.updateMemberFields(member.webling_id, properties);
@@ -312,7 +322,6 @@ router.post('/members/:id/webling-push', async (req, res) => {
       }
       res.json({ ok: true, action: 'updated', webling_id: member.webling_id });
     } else {
-      // Neu anlegen
       const newWeblingId = await _pushMemberToWebling(member, member.membership_status);
       res.json({ ok: true, action: 'created', webling_id: newWeblingId });
     }
