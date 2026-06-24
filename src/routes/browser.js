@@ -368,7 +368,8 @@ function _buildWeblingProperties(member, status) {
   properties['Name']      = nachname;
   properties['E-Mail P']  = member.email || properties['E-Mail P'] || '';
   properties['Status']    = status || '';
-  if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
+  // Mitglieder ID nur setzen wenn explizit gewünscht (beim Create kann sie bereits vergeben sein)
+  delete properties['Mitglieder ID'];
 
   return properties;
 }
