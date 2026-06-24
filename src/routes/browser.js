@@ -365,7 +365,14 @@ async function _pushMemberToWebling(member, status) {
   };
   if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
 
-  const result    = await weblingService.createMember(properties);
+  console.log('[_pushMemberToWebling] properties:', JSON.stringify(properties));
+  let result;
+  try {
+    result = await weblingService.createMember(properties);
+  } catch (err) {
+    console.error('[_pushMemberToWebling] HTTP', err.response?.status, JSON.stringify(err.response?.data));
+    throw err;
+  }
   const weblingId = typeof result === 'number' ? result : (result?.id ?? result);
   if (weblingId) {
     await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [weblingId, member.id]);
