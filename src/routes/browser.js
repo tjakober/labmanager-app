@@ -375,10 +375,6 @@ async function _findWeblingIdByZynexId(zynexId) {
   return null;
 }
 
-async function _resolvedStatus(statusText) {
-  return await weblingService.resolveStatusIndex(statusText);
-}
-
 // Bekannte Webling-Feldnamen (Whitelist verhindert unbekannte Felder wie Status1)
 const WEBLING_FIELD_WHITELIST = [
   'Vorname', 'Name', 'E-Mail P', 'E-Mail G', 'Status', 'Mitglieder ID',
@@ -456,18 +452,11 @@ async function _appendMembershipHistory(weblingId, status) {
 async function _pushMemberToWebling(member, status) {
   const properties = _buildWeblingProperties(member, status);
 
-  // Parents: Haupt-Membergroup + Status-spezifische Untergruppe
-  const memberGroupId  = await configService.get('webling.member_group_id') || 0;
-  const statusGroups   = await configService.get('webling.status_groups') || {};
-  const rawStatusGroups = Array.isArray(statusGroups) ? {} :
-    (typeof statusGroups === 'string' ? (() => { try { return JSON.parse(statusGroups); } catch { return {}; } })() : statusGroups);
+  // Parents: Haupt-Membergroup + Status-spezifische Untergruppe (via Webling API)
+  const memberGroupId = await configService.get('webling.member_group_id') || 0;
   const parents = memberGroupId ? [Number(memberGroupId)] : [];
-  for (const [substring, groupId] of Object.entries(rawStatusGroups)) {
-    if (status && status.toLowerCase().includes(substring.toLowerCase())) {
-      parents.push(Number(groupId));
-      break;
-    }
-  }
+  const subgroupId = await weblingService.resolveStatusSubgroup(status, memberGroupId || null);
+  if (subgroupId) parents.push(subgroupId);
 
   let result;
   try {

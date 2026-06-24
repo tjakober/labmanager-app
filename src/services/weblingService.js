@@ -78,28 +78,38 @@ async function bookDeposit(weblingId, amount, creditAccount, reference) {
 let _accountCache = null;      // Map<string, number>
 let _activePeriodId = null;    // number
 
-// Cache für Status-Optionen: label (lowercase) → index
-let _statusOptionsCache = null; // Map<string, number>
+// Cache: membergroup title (lowercase) → id
+let _subgroupCache = null; // Map<string, number>
 
-async function _resolveStatusIndex(statusText) {
-  if (!_statusOptionsCache) {
-    _statusOptionsCache = new Map();
+/**
+ * Lädt alle Kinder der Haupt-Membergroup und baut einen title→id Cache auf.
+ * Gibt die ID der Untergruppe zurück deren Titel im statusText vorkommt.
+ */
+async function resolveStatusSubgroup(statusText, parentGroupId) {
+  if (!parentGroupId) return null;
+  if (!_subgroupCache) {
+    _subgroupCache = new Map();
     try {
-      // Status ist Plain String — kein Index nötig, Cache bleibt leer (Fallback = Text direkt)
-      const fields = data?.properties || {};
-      const statusField = fields['Status'];
-      const options = statusField?.options || statusField?.enum || statusField?.values || [];
-      for (let i = 0; i < options.length; i++) {
-        const label = typeof options[i] === 'string' ? options[i] : (options[i].label || options[i].value || String(options[i]));
-        _statusOptionsCache.set(label.toLowerCase(), i);
+      const { data } = await client().get(`/membergroup/${parentGroupId}`);
+      const childIds = data?.children?.membergroup || [];
+      if (childIds.length) {
+        const { data: details } = await client().get('/membergroup/' + childIds.join(','));
+        const rows = Array.isArray(details) ? details : [details];
+        for (const g of rows) {
+          const title = (g.properties?.title || '').trim();
+          if (title) _subgroupCache.set(title.toLowerCase(), Number(g.id));
+        }
       }
-      console.log(`[weblingService] Status-Optionen geladen: ${_statusOptionsCache.size}`, [..._statusOptionsCache.entries()]);
+      console.log(`[weblingService] Untergruppen-Cache: ${[..._subgroupCache.entries()].map(([k,v]) => `${k}=${v}`).join(', ')}`);
     } catch (err) {
-      console.warn('[weblingService] Status-Optionen konnten nicht geladen werden:', err.message);
+      console.warn('[weblingService] Untergruppen konnten nicht geladen werden:', err.message);
     }
   }
-  const idx = _statusOptionsCache.get(statusText.toLowerCase());
-  return idx !== undefined ? idx : statusText; // Fallback: Text direkt (falls kein Auswahlfeld)
+  const sl = (statusText || '').toLowerCase();
+  for (const [title, id] of _subgroupCache.entries()) {
+    if (sl.includes(title)) return id;
+  }
+  return null;
 }
 
 async function _loadActivePeriod() {
@@ -305,7 +315,7 @@ async function deleteMember(weblingId) {
 module.exports = {
   _client: client,
   getMember,
-  resolveStatusIndex: _resolveStatusIndex,
+  resolveStatusSubgroup,
   isActive,
   updateMemberFields,
   getBalance,
