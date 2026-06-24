@@ -265,7 +265,7 @@ router.patch('/members/:id/status', async (req, res) => {
     const member = await db.queryOne(Q.getMemberById, [id]);
     let pushed = false;
     const sl = status.toLowerCase();
-    const shouldPush = sl === 'antrag' || sl.startsWith('mitglied');
+    const shouldPush = sl === 'antrag' || sl.startsWith('mitglied') || sl === 'ausgeschlossen';
     if (shouldPush && member.webling_id) {
       await weblingService.updateMemberFields(member.webling_id, { Status: status });
       await _appendMembershipHistory(member.webling_id, status);
@@ -328,10 +328,13 @@ async function _appendMembershipHistory(weblingId, status) {
     if (sl === 'antrag') {
       history.push({ _typ: 'mitgliedschaft', bezeichnung: 'antrag', antragsDatum: today });
     } else if (sl.startsWith('mitglied')) {
-      // Offenen Antrag-Eintrag ergänzen oder neuen anlegen
       const open = [...history].reverse().find(e => e._typ === 'mitgliedschaft' && !e.eintrittsdatum && !e.kuendigDatum);
       if (open) open.eintrittsdatum = today;
       else history.push({ _typ: 'mitgliedschaft', bezeichnung: 'eintritt', eintrittsdatum: today });
+    } else if (sl === 'ausgeschlossen') {
+      const open = [...history].reverse().find(e => e._typ === 'mitgliedschaft' && !e.kuendigDatum);
+      if (open) { open.bezeichnung = 'ausgeschlossen'; open.kuendigDatum = today; }
+      else history.push({ _typ: 'mitgliedschaft', bezeichnung: 'ausgeschlossen', kuendigDatum: today });
     }
 
     await weblingService.updateUpgradeHistory(weblingId, history);

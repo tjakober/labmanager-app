@@ -229,9 +229,17 @@
                         class="text-xs text-gray-400 hover:text-blue-600">&#9998;</button>
                     </div>
                     <div x-show="memberStatusEditing" class="flex gap-2 items-center">
-                      <input x-model="memberStatusValue" type="text"
-                        class="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        @keyup.enter="saveMemberStatus" @keyup.escape="memberStatusEditing = false">
+                      <select x-model="memberStatusValue"
+                        class="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="Antrag">Antrag</option>
+                        <template x-for="typ in ['Basis','Premium','Kommerziell']" :key="typ">
+                          <option :value="'Mitglied ' + new Date().getFullYear() + ' ' + typ"
+                                  x-text="'Mitglied ' + new Date().getFullYear() + ' ' + typ"></option>
+                        </template>
+                        <option value="Ex-Mitglied">Ex-Mitglied</option>
+                        <option value="Extern">Extern</option>
+                        <option value="Ausgeschlossen">Ausgeschlossen</option>
+                      </select>
                       <button @click="saveMemberStatus" :disabled="memberStatusSaving"
                         class="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-40">
                         <span x-text="memberStatusSaving ? '…' : 'OK'"></span>
