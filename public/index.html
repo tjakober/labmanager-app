@@ -2253,9 +2253,10 @@ function app() {
           const res = await this._get('/api/browser/members/' + id + '/balance');
           this.memberBalance = res.balance;
           this.memberBalanceLoading = false;
-          if (this.isLabmanager && this.giftAccounts.length === 0) {
-            const ga = await this._get('/api/browser/gift-accounts').catch(() => ({ accounts: [] }));
-            this.giftAccounts = ga.accounts || [];
+          if (this.isLabmanager) {
+            const ga = await this._get('/api/browser/gift-accounts').catch(e => { console.warn('gift-accounts:', e.message); return { accounts: [] }; });
+            this.giftAccounts = Array.isArray(ga.accounts) ? ga.accounts : [];
+            console.log('[gift-accounts]', this.giftAccounts);
           }
         } else if (tab === 'rights') {
           const [rightsRes, tagsRes] = await Promise.all([
