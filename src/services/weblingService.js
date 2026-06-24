@@ -78,6 +78,31 @@ async function bookDeposit(weblingId, amount, creditAccount, reference) {
 let _accountCache = null;      // Map<string, number>
 let _activePeriodId = null;    // number
 
+// Cache für Status-Optionen: label (lowercase) → index
+let _statusOptionsCache = null; // Map<string, number>
+
+async function _resolveStatusIndex(statusText) {
+  if (!_statusOptionsCache) {
+    _statusOptionsCache = new Map();
+    try {
+      const { data } = await client().get('/member/definition');
+      console.log('[weblingService] member/definition Status field:', JSON.stringify(data?.properties?.Status));
+      const fields = data?.properties || {};
+      const statusField = fields['Status'];
+      const options = statusField?.options || statusField?.enum || statusField?.values || [];
+      for (let i = 0; i < options.length; i++) {
+        const label = typeof options[i] === 'string' ? options[i] : (options[i].label || options[i].value || String(options[i]));
+        _statusOptionsCache.set(label.toLowerCase(), i);
+      }
+      console.log(`[weblingService] Status-Optionen geladen: ${_statusOptionsCache.size}`, [..._statusOptionsCache.entries()]);
+    } catch (err) {
+      console.warn('[weblingService] Status-Optionen konnten nicht geladen werden:', err.message);
+    }
+  }
+  const idx = _statusOptionsCache.get(statusText.toLowerCase());
+  return idx !== undefined ? idx : statusText; // Fallback: Text direkt (falls kein Auswahlfeld)
+}
+
 async function _loadActivePeriod() {
   if (_activePeriodId) return _activePeriodId;
   const { data } = await client().get('/period');
@@ -281,6 +306,7 @@ async function deleteMember(weblingId) {
 module.exports = {
   _client: client,
   getMember,
+  resolveStatusIndex: _resolveStatusIndex,
   isActive,
   updateMemberFields,
   getBalance,
