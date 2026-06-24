@@ -85,8 +85,11 @@ async function _resolveStatusIndex(statusText) {
   if (!_statusOptionsCache) {
     _statusOptionsCache = new Map();
     try {
-      const { data } = await client().get('/member/definition');
-      console.log('[weblingService] member/definition Status field:', JSON.stringify(data?.properties?.Status));
+      // Einen bekannten Member laden um die Feldstruktur zu sehen
+      const listData = await client().get('/member');
+      const firstId = (listData.data?.objects || [])[0];
+      const { data } = firstId ? await client().get(`/member/${firstId}`) : { data: {} };
+      console.log('[weblingService] member Status field raw:', JSON.stringify(data?.properties?.Status));
       const fields = data?.properties || {};
       const statusField = fields['Status'];
       const options = statusField?.options || statusField?.enum || statusField?.values || [];
