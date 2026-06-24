@@ -272,7 +272,8 @@ router.get('/gift-accounts', async (req, res) => {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   try {
-    const allAccounts = await configService.get('balance.gift_accounts') || [];
+    const rawAccounts = await configService.get('balance.gift_accounts');
+    const allAccounts = Array.isArray(rawAccounts) ? rawAccounts : [];
     if (!allAccounts.length) return res.json({ accounts: [] });
 
     // Fachgruppen des eingeloggten Users laden
@@ -314,7 +315,8 @@ router.post('/members/:id/balance/gift', async (req, res) => {
 
   try {
     // Prüfen ob Konto erlaubt und User berechtigt
-    const allAccounts = await configService.get('balance.gift_accounts') || [];
+    const rawAccounts2 = await configService.get('balance.gift_accounts');
+    const allAccounts = Array.isArray(rawAccounts2) ? rawAccounts2 : [];
     const account = allAccounts.find(a => a.konto_nr === String(konto_nr));
     if (!account) return res.status(400).json({ error: 'Konto nicht konfiguriert' });
 
