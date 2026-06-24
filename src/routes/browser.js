@@ -365,10 +365,10 @@ async function _pushMemberToWebling(member, status) {
   };
   if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
 
-  console.log('[_pushMemberToWebling] properties:', JSON.stringify(properties));
+  const memberGroupId = await configService.get('webling.member_group_id') || 0;
   let result;
   try {
-    result = await weblingService.createMember(properties);
+    result = await weblingService.createMember(properties, memberGroupId || null);
   } catch (err) {
     console.error('[_pushMemberToWebling] HTTP', err.response?.status, JSON.stringify(err.response?.data));
     throw err;

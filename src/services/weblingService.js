@@ -267,8 +267,10 @@ async function getAllMembers() {
   return data.objects || data;
 }
 
-async function createMember(properties) {
-  const { data } = await client().post('/member', { properties });
+async function createMember(properties, parentGroupId = null) {
+  const payload = { properties };
+  if (parentGroupId) payload.parents = [Number(parentGroupId)];
+  const { data } = await client().post('/member', payload);
   return data;
 }
 
