@@ -136,30 +136,46 @@ router.post('/reset-confirm', async (req, res) => {
 /**
  * POST /api/auth/badge-login
  * Body: { badge_uid }
- * Loggt einen User per Badge-UID ein (nur wenn badge_login_enabled = 1).
+ * Badge-Login ist immer aktiv. Mitgliedschaft wird geprüft (active_statuses + Toleranz Januar).
  */
 router.post('/badge-login', async (req, res) => {
-  const { badge_uid, password } = req.body;
+  const { badge_uid } = req.body;
   if (!badge_uid) return res.status(400).json({ error: 'badge_uid erforderlich' });
 
   try {
-    const uid  = Number(badge_uid);
+    const uid = Number(badge_uid);
     if (!Number.isFinite(uid)) return res.status(400).json({ error: 'Ungültige Badge-UID' });
 
     const user = await db.queryOne(Q.getUserByTagUid, [uid]);
-    if (!user) {
-      return res.status(401).json({ error: 'Badge unbekannt' });
+    if (!user) return res.status(401).json({ error: 'Badge unbekannt oder gesperrt' });
+
+    // Mitgliedschaftsprüfung: aktive Statuses aus Config + Toleranz Januar
+    const activeStatuses = await require('../services/configService').get('webling.active_statuses') || [];
+    const activePatterns = activeStatuses.map(s =>
+      new RegExp('^' + s.toLowerCase().replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
+    );
+    const status = (user.membership_status || '').toLowerCase();
+    const isActive = activePatterns.length === 0 || activePatterns.some(p => p.test(status));
+
+    // Toleranz: im Januar des laufenden Jahres auch Vorjahresmitgliedschaft akzeptieren
+    // z.B. "Mitglied 2024 Basis" im Januar 2025 noch gültig
+    let allowed = isActive;
+    if (!allowed && activePatterns.length > 0) {
+      const now = new Date();
+      if (now.getMonth() === 0) { // Januar = Monat 0
+        const prevYear = now.getFullYear() - 1;
+        const prevYearPatterns = activeStatuses.map(s =>
+          new RegExp('^' + s.toLowerCase()
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(String(now.getFullYear()), String(prevYear)) + '$')
+        );
+        allowed = prevYearPatterns.some(p => p.test(status));
+      }
     }
 
-    if (!user.badge_login_enabled) {
-      if (!password) {
-        return res.status(401).json({ error: 'Passwort erforderlich', error_code: 'BADGE_LOGIN_DISABLED' });
-      }
-      if (!user.password_hash) {
-        return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
-      }
-      const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
+    if (!allowed) {
+      return res.status(403).json({ error: 'Mitgliedschaft nicht aktiv', error_code: 'MEMBERSHIP_INACTIVE' });
     }
 
     const roleRows = await db.query(Q.getRolesByUserId, [user.id]);

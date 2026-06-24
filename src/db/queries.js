@@ -399,7 +399,7 @@ module.exports = {
     FROM users WHERE email = ? AND active = 1`,
 
   getUserByTagUid: `
-    SELECT u.id, u.name, u.badge_login_enabled, u.password_hash
+    SELECT u.id, u.name, u.membership_status
     FROM tags t
     JOIN users u ON u.id = t.user_id
     WHERE t.id = ? AND t.blocked = 0 AND u.active = 1
