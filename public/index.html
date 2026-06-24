@@ -20,7 +20,7 @@
      x-text="toast?.msg"></div>
 
 <!-- ── Login ────────────────────────────────────────────────────────────────── -->
-<div x-show="!token" class="min-h-screen flex items-center justify-center bg-gray-900">
+<div x-show="!token" x-effect="if (!token) $nextTick(() => $refs.badgeInput?.focus())" class="min-h-screen flex items-center justify-center bg-gray-900">
   <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
     <div class="text-center mb-6">
       <h1 class="text-2xl font-bold text-gray-800">FabLab Winti</h1>
@@ -28,7 +28,7 @@
     </div>
     <form @submit.prevent="login" autocomplete="off">
       <label class="block text-xs font-medium text-gray-600 mb-1">Badge-UID</label>
-      <input x-model="loginBadgeUid" type="text" required autocomplete="off" autofocus
+      <input x-model="loginBadgeUid" type="text" required autocomplete="off" x-ref="badgeInput"
         @input="loginError = ''"
         class="w-full border rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="Badge auf Leser halten oder UID eingeben">
