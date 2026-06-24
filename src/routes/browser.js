@@ -268,7 +268,7 @@ router.patch('/members/:id/status', async (req, res) => {
     const shouldPush = sl === 'antrag' || sl.startsWith('mitglied') || sl === 'ausgeschlossen';
     if (shouldPush && member.webling_id) {
       try {
-        await weblingService.updateMemberFields(member.webling_id, { Status: await _resolvedStatus(status) });
+        await weblingService.updateMemberFields(member.webling_id, { Status: status });
       } catch (pushErr) {
         const body = JSON.stringify(pushErr.response?.data);
         console.error(`[status/webling-push] HTTP ${pushErr.response?.status} body=${body}`);
@@ -303,17 +303,7 @@ router.post('/members/:id/webling-push', async (req, res) => {
     if (!member) return res.status(404).json({ error: 'Mitglied nicht gefunden' });
 
     if (member.webling_id) {
-      // Bereits in Webling: alle Felder aus webling_meta + aktuellen Status pushen
-      const statusIdx = await _resolvedStatus(member.membership_status || '');
-      let properties = { Status: statusIdx };
-      if (member.webling_meta) {
-        try {
-          const meta = JSON.parse(member.webling_meta);
-          const raw = meta.properties || {};
-          properties = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== '' && v != null));
-          properties.Status = statusIdx;
-        } catch { /* ignore */ }
-      }
+      const properties = _buildWeblingProperties(member, member.membership_status);
       try {
         await weblingService.updateMemberFields(member.webling_id, properties);
       } catch (err2) {
@@ -334,6 +324,44 @@ router.post('/members/:id/webling-push', async (req, res) => {
 
 async function _resolvedStatus(statusText) {
   return await weblingService.resolveStatusIndex(statusText);
+}
+
+// Bekannte Webling-Feldnamen (Whitelist verhindert unbekannte Felder wie Status1)
+const WEBLING_FIELD_WHITELIST = [
+  'Vorname', 'Name', 'E-Mail P', 'E-Mail G', 'Status', 'Mitglieder ID',
+  'Strasse', 'Adresszusatz', 'PLZ', 'Ort', 'Land',
+  'Telefon P', 'Telefon G', 'Mobile P', 'Mobile G',
+  'Firma', 'Anrede', 'Geburtsdatum', 'Eintrittsdatum', 'Austrittsdatum',
+  'Funktion', 'Bemerkungen', 'Datum Antrag',
+];
+
+function _buildWeblingProperties(member, status) {
+  const nameParts = (member.name || '').trim().split(/\s+/);
+  const vorname   = nameParts.slice(0, -1).join(' ') || nameParts[0] || '';
+  const nachname  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
+  // Basis aus webling_meta (nur Whitelist-Felder, keine leeren Strings)
+  let properties = {};
+  if (member.webling_meta) {
+    try {
+      const meta = JSON.parse(member.webling_meta);
+      const raw  = meta.properties || {};
+      for (const key of WEBLING_FIELD_WHITELIST) {
+        if (raw[key] !== undefined && raw[key] !== '' && raw[key] != null) {
+          properties[key] = raw[key];
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Aktuelle Werte setzen
+  properties['Vorname']   = vorname;
+  properties['Name']      = nachname;
+  properties['E-Mail P']  = member.email || properties['E-Mail P'] || '';
+  properties['Status']    = status || '';
+  if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
+
+  return properties;
 }
 
 /**
@@ -372,26 +400,7 @@ async function _appendMembershipHistory(weblingId, status) {
  * Erstellt ein neues Webling-Mitglied aus lokalem User und setzt webling_id in DB.
  */
 async function _pushMemberToWebling(member, status) {
-  const nameParts = (member.name || '').trim().split(/\s+/);
-  const vorname   = nameParts.slice(0, -1).join(' ') || nameParts[0] || '';
-  const nachname  = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
-
-  // Basis-Properties aus webling_meta übernehmen (enthält alle Webling-Felder vom letzten Sync)
-  let properties = {};
-  if (member.webling_meta) {
-    try {
-      const meta = JSON.parse(member.webling_meta);
-      const raw = meta.properties || {};
-      properties = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== '' && v != null));
-    } catch { /* ignore */ }
-  }
-
-  // Aktuelle Werte überschreiben
-  properties['Vorname']    = vorname;
-  properties['Name']       = nachname;
-  properties['E-Mail P']   = member.email || properties['E-Mail P'] || '';
-  properties['Status']     = await _resolvedStatus(status || '');
-  if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
+  const properties = _buildWeblingProperties(member, status);
 
   console.log('[_pushMemberToWebling] webling_meta present:', !!member.webling_meta, 'properties keys:', Object.keys(properties));
   const memberGroupId = await configService.get('webling.member_group_id') || 0;
