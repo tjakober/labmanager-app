@@ -267,7 +267,13 @@ router.patch('/members/:id/status', async (req, res) => {
     const sl = status.toLowerCase();
     const shouldPush = sl === 'antrag' || sl.startsWith('mitglied') || sl === 'ausgeschlossen';
     if (shouldPush && member.webling_id) {
-      await weblingService.updateMemberFields(member.webling_id, { Status: status });
+      try {
+        await weblingService.updateMemberFields(member.webling_id, { Status: status });
+      } catch (pushErr) {
+        const body = JSON.stringify(pushErr.response?.data);
+        console.error(`[status/webling-push] HTTP ${pushErr.response?.status} body=${body}`);
+        throw pushErr;
+      }
       await _appendMembershipHistory(member.webling_id, status);
       pushed = true;
     } else if (shouldPush && !member.webling_id) {
