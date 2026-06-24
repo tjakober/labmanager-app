@@ -193,6 +193,41 @@ async function bookInvoice({ weblingId, invoiceId, userName, date, paymodeKontoN
   return createdIds[0] ?? null;
 }
 
+/**
+ * Bucht eine Guthaben-Schenkung als Entrygroup in Webling und erhöht das Guthaben-Feld.
+ * SOLL (debit): debitKontoNr (Schenkungskonto, z.B. Projektfonds)
+ * HABEN (credit): creditKontoNr (Guthaben-Gegenkonto, aus Config balance.gift_credit_account)
+ */
+async function bookGift(weblingId, amount, debitKontoNr, creditKontoNr, reference) {
+  const periodId  = await _loadActivePeriod();
+  const debitId   = await _resolveAccountId(debitKontoNr);
+  const creditId  = await _resolveAccountId(creditKontoNr);
+
+  const payload = {
+    type: 'entrygroup',
+    properties: { title: reference, date: new Date().toISOString().slice(0, 10) },
+    parents:    [periodId],
+    children: {
+      entry: [{
+        type:       'entry',
+        properties: { amount },
+        links:      { debit: [debitId], credit: [creditId] },
+      }],
+    },
+  };
+  try {
+    await client().post('/entrygroup', payload);
+  } catch (err) {
+    const status = err.response?.status;
+    const body   = JSON.stringify(err.response?.data);
+    throw new Error(`Webling ${status} (Buchung): ${body}`);
+  }
+
+  // Guthaben-Feld auf Member aktualisieren
+  const current = await getBalance(weblingId);
+  await setBalance(weblingId, +(current + amount).toFixed(2));
+}
+
 async function bookWithdraw(weblingId, amount, debitAccount, reference) {
   // Die Buchungs-Entrygroup wird via bookInvoice erstellt.
   // Hier nur das Guthaben-Feld auf dem Webling-Mitglied aktualisieren.
@@ -249,6 +284,7 @@ module.exports = {
   getBalance,
   setBalance,
   bookDeposit,
+  bookGift,
   bookWithdraw,
   bookInvoice,
   setUpgrade,

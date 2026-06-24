@@ -16,7 +16,9 @@ VALUES
   ('webling.reserve',             '20',              'number',  'Reserve unter Maximum'),
   ('webling.active_statuses',     '[]',              'json',    'Webling-Statuses die als aktive Mitglieder gelten (leer = alle)'),
   ('webling.fachgruppe_roles',    '{"LabManager":"labmanager","ICT":"admin"}', 'json', 'Fachgruppen-Name → lokale Rolle'),
-  ('webling.member_group_id',     '0',               'number',  'Webling membergroup-ID für neue Mitglieder (0 = kein Parent)')
+  ('webling.member_group_id',     '0',               'number',  'Webling membergroup-ID für neue Mitglieder (0 = kein Parent)'),
+  ('balance.gift_credit_account', '',                'string',  'Webling-Konto HABEN bei Guthaben-Schenkung (z.B. 1001)'),
+  ('balance.gift_accounts',       '[]',              'json',    'Konti für Guthaben-Schenkung: [{konto_nr, bezeichnung, fachgruppe?}]')
 ON DUPLICATE KEY UPDATE
   type        = VALUES(type),
   description = VALUES(description);

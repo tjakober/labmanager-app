@@ -263,6 +263,100 @@ router.get('/members/:id/balance', async (req, res) => {
 });
 
 /**
+ * GET /api/browser/gift-accounts
+ * Gibt konfigurierte Schenkungskonti zurück, gefiltert auf Konti die der eingeloggte
+ * User verwenden darf (Fachgruppen-Einschränkung).
+ */
+router.get('/gift-accounts', async (req, res) => {
+  if (!req.user.roles.some(r => ['admin', 'labmanager'].includes(r))) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  try {
+    const allAccounts = await configService.get('balance.gift_accounts') || [];
+    if (!allAccounts.length) return res.json({ accounts: [] });
+
+    // Fachgruppen des eingeloggten Users laden
+    const userFachgruppen = await db.query(
+      `SELECT f.beschreibung FROM fachgruppen f
+       JOIN user_fachgruppen uf ON uf.fachgruppe_id = f.id
+       WHERE uf.user_id = ?`, [req.user.id]
+    );
+    const userFgNames = userFachgruppen.map(f => (f.beschreibung || '').toLowerCase());
+
+    // Konti ohne Einschränkung oder wenn User in der Fachgruppe ist
+    const allowed = allAccounts.filter(a => {
+      if (!a.fachgruppe) return true;
+      return userFgNames.some(fg => fg.includes(a.fachgruppe.toLowerCase()));
+    });
+
+    res.json({ accounts: allowed });
+  } catch (err) {
+    console.error('[browser/gift-accounts]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
+ * POST /api/browser/members/:id/balance/gift
+ * Body: { konto_nr, amount, bezeichnung }
+ * Guthaben-Schenkung: Buchung von konfiguriertem Konto → Guthabenkonto + Saldo-Update.
+ */
+router.post('/members/:id/balance/gift', async (req, res) => {
+  if (!req.user.roles.some(r => ['admin', 'labmanager'].includes(r))) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const memberId = parseInt(req.params.id);
+  const { konto_nr, amount, bezeichnung } = req.body;
+
+  if (!konto_nr || !amount || amount <= 0) {
+    return res.status(400).json({ error: 'konto_nr und amount erforderlich' });
+  }
+
+  try {
+    // Prüfen ob Konto erlaubt und User berechtigt
+    const allAccounts = await configService.get('balance.gift_accounts') || [];
+    const account = allAccounts.find(a => a.konto_nr === String(konto_nr));
+    if (!account) return res.status(400).json({ error: 'Konto nicht konfiguriert' });
+
+    if (account.fachgruppe) {
+      const userFachgruppen = await db.query(
+        `SELECT f.beschreibung FROM fachgruppen f
+         JOIN user_fachgruppen uf ON uf.fachgruppe_id = f.id
+         WHERE uf.user_id = ?`, [req.user.id]
+      );
+      const inFg = userFachgruppen.some(f =>
+        (f.beschreibung || '').toLowerCase().includes(account.fachgruppe.toLowerCase())
+      );
+      if (!inFg) return res.status(403).json({ error: 'Keine Berechtigung für dieses Konto' });
+    }
+
+    const creditKontoNr = await configService.get('balance.gift_credit_account');
+    if (!creditKontoNr) return res.status(500).json({ error: 'balance.gift_credit_account nicht konfiguriert' });
+
+    const maxDeposit = await configService.get('balance.max_deposit') || 500;
+    const weblingId = (await db.queryOne(Q.getMemberById, [memberId]))?.webling_id;
+    if (!weblingId) return res.status(404).json({ error: 'Mitglied hat kein Webling-Konto' });
+
+    const currentBalance = await weblingService.getBalance(Number(weblingId));
+    if (currentBalance + amount > maxDeposit) {
+      return res.status(400).json({ error: `Max. Guthaben CHF ${maxDeposit} würde überschritten (aktuell: ${currentBalance})` });
+    }
+
+    const member = await db.queryOne(Q.getMemberById, [memberId]);
+    const reference = `Guthaben-Schenkung ${bezeichnung || account.bezeichnung} – ${member?.name || ''}`;
+    await weblingService.bookGift(Number(weblingId), amount, konto_nr, creditKontoNr, reference);
+
+    await db.query(Q.insertBalanceTransaction,
+      [memberId, 'deposit', amount, konto_nr, reference, currentBalance + amount, req.user.name || 'labmanager']);
+
+    res.json({ ok: true, new_balance: +(currentBalance + amount).toFixed(2) });
+  } catch (err) {
+    console.error('[browser/members/:id/balance/gift]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
  * GET /api/browser/members/:id/rights
  * Labmanager sehen alle Rights (inkl. abgelaufene); Members nur aktive.
  */

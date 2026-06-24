@@ -299,7 +299,7 @@
           </div>
 
           <!-- Tab: Balance -->
-          <div x-show="memberTab === 'balance'">
+          <div x-show="memberTab === 'balance'" class="space-y-4">
             <div x-show="memberBalanceLoading" class="text-gray-400 text-sm">Lädt…</div>
             <div x-show="!memberBalanceLoading">
               <p class="text-3xl font-bold"
@@ -308,6 +308,29 @@
               </p>
               <p class="text-xs text-gray-400 mt-1">Quelle: Webling (Live)</p>
             </div>
+
+            <!-- Guthaben schenken (nur Labmanager/Admin) -->
+            <template x-if="isLabmanager && giftAccounts.length > 0">
+              <div class="border-t pt-4">
+                <h4 class="text-xs font-semibold text-gray-600 mb-3">Guthaben schenken</h4>
+                <div class="space-y-2">
+                  <select x-model="giftKontoNr"
+                    class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">— Konto wählen —</option>
+                    <template x-for="a in giftAccounts" :key="a.konto_nr">
+                      <option :value="a.konto_nr" x-text="a.bezeichnung + ' (' + a.konto_nr + ')'"></option>
+                    </template>
+                  </select>
+                  <input x-model.number="giftAmount" type="number" min="0.01" step="0.01" placeholder="Betrag (CHF)"
+                    class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <button @click="submitGift"
+                    :disabled="!giftKontoNr || !giftAmount || giftSaving"
+                    class="w-full py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-40 transition-colors">
+                    <span x-text="giftSaving ? 'Buche…' : 'Guthaben schenken'"></span>
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
 
           <!-- Tab: Rights -->
@@ -782,48 +805,6 @@
       </div>
     </div>
 
-    <!-- ══ Balance ════════════════════════════════════════════════════════════ -->
-    <div x-show="view === 'balance'" class="p-6">
-      <h2 class="text-xl font-bold text-gray-800 mb-5">Guthaben</h2>
-      <div class="max-w-md space-y-4">
-        <div class="bg-white rounded-xl border p-4">
-          <label class="block text-xs font-medium text-gray-600 mb-2">Mitglied suchen</label>
-          <div class="flex gap-2">
-            <input x-model="balanceMemberSearch" type="text" placeholder="Name oder E-Mail"
-              @keyup.enter="balanceSearchMember"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button @click="balanceSearchMember"
-              class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">Suchen</button>
-          </div>
-          <div x-show="balanceCandidates.length > 0"
-               class="border rounded-lg mt-2 bg-white shadow-sm divide-y overflow-hidden">
-            <template x-for="m in balanceCandidates" :key="m.id">
-              <button @click="selectBalanceMember(m)"
-                class="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm">
-                <span x-text="m.name"></span>
-                <span class="text-gray-400 text-xs ml-2" x-text="m.email"></span>
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <div x-show="balanceSelectedMember" class="bg-white rounded-xl border p-4">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <p class="font-semibold text-gray-800 text-sm" x-text="balanceSelectedMember?.name"></p>
-              <p class="text-xs text-gray-400" x-text="balanceSelectedMember?.email"></p>
-            </div>
-            <div class="text-right">
-              <p class="text-xs text-gray-400">Guthaben</p>
-              <p class="text-xl font-bold"
-                 :class="(currentBalance||0) >= 0 ? 'text-green-600' : 'text-red-600'">
-                CHF <span x-text="currentBalance !== null ? Number(currentBalance).toFixed(2) : '…'"></span>
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- ══ My Account ════════════════════════════════════════════════════════ -->
     <div x-show="view === 'my-account'" class="p-4 space-y-4 max-w-2xl">
@@ -1877,6 +1858,10 @@ function app() {
     memberUpgrade: null,
     memberUpgradeHistory: [],
     newTagId: '',
+    giftAccounts: [],
+    giftKontoNr: '',
+    giftAmount: '',
+    giftSaving: false,
 
     // ── Assignments ───────────────────────────────────────────────────────────
     assignments: [],
@@ -1993,7 +1978,6 @@ function app() {
       if (!this.isPrivileged) items.push({ id: 'my-account',  icon: '🏠', label: 'Mein Konto' });
       if (this.isPrivileged) items.push({ id: 'members',     icon: '👥', label: 'Mitglieder' });
       if (this.isLabmanager) items.push({ id: 'assignments', icon: '📅', label: 'Einsatzplanung' });
-      if (this.isPrivileged) items.push({ id: 'balance',     icon: '💰', label: 'Guthaben' });
       if (this.isLabmanager) items.push({ id: 'machine-status', icon: '🖥️', label: 'Belegung' });
       if (this.isLabmanager) items.push({ id: 'settings',    icon: '⚙️', label: 'Einstellungen' });
       items.push(              { id: 'profile',    icon: '👤', label: 'Profil' });
@@ -2271,6 +2255,10 @@ function app() {
           const res = await this._get('/api/browser/members/' + id + '/balance');
           this.memberBalance = res.balance;
           this.memberBalanceLoading = false;
+          if (this.isLabmanager && this.giftAccounts.length === 0) {
+            const ga = await this._get('/api/browser/gift-accounts').catch(() => ({ accounts: [] }));
+            this.giftAccounts = ga.accounts || [];
+          }
         } else if (tab === 'rights') {
           const [rightsRes, tagsRes] = await Promise.all([
             this._get('/api/browser/members/' + id + '/rights'),
@@ -2307,6 +2295,25 @@ function app() {
       } catch (err) {
         this.memberBalanceLoading = false;
         this.showToast(err.message, 'error');
+      }
+    },
+
+    async submitGift() {
+      if (!this.giftKontoNr || !this.giftAmount || this.giftSaving) return;
+      this.giftSaving = true;
+      try {
+        const res = await this._post(
+          '/api/browser/members/' + this.selectedMember.id + '/balance/gift',
+          { konto_nr: this.giftKontoNr, amount: parseFloat(this.giftAmount) }
+        );
+        this.memberBalance = res.new_balance;
+        this.giftAmount    = '';
+        this.giftKontoNr   = '';
+        this.showToast('Guthaben-Schenkung gebucht: CHF ' + Number(res.new_balance).toFixed(2));
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.giftSaving = false;
       }
     },
 
