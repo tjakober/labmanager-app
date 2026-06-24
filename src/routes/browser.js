@@ -286,10 +286,9 @@ router.get('/gift-accounts', async (req, res) => {
     );
     const userFgNames = userFachgruppen.map(f => (f.beschreibung || '').toLowerCase());
 
-    const isAdmin = req.user.roles.includes('admin');
-    // Konti ohne Einschränkung, Admin sieht alle, sonst Fachgruppen-Check
+    // Konti ohne Einschränkung oder wenn User in der Fachgruppe ist
     const allowed = allAccounts.filter(a => {
-      if (!a.fachgruppe || isAdmin) return true;
+      if (!a.fachgruppe) return true;
       return userFgNames.some(fg => fg.includes(a.fachgruppe.toLowerCase()));
     });
 
