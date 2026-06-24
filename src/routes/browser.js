@@ -277,9 +277,16 @@ router.patch('/members/:id/status', async (req, res) => {
       await _appendMembershipHistory(member.webling_id, status);
       pushed = true;
     } else if (shouldPush && !member.webling_id) {
-      const newWeblingId = await _pushMemberToWebling(member, status);
-      if (newWeblingId) await _appendMembershipHistory(newWeblingId, status);
-      pushed = !!newWeblingId;
+      // Zuerst in Webling nach zynex_id suchen
+      let targetId = member.zynex_id ? await _findWeblingIdByZynexId(member.zynex_id) : null;
+      if (targetId) {
+        await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [targetId, id]);
+        await weblingService.updateMemberFields(targetId, { Status: status });
+      } else {
+        targetId = await _pushMemberToWebling(member, status);
+      }
+      if (targetId) await _appendMembershipHistory(targetId, status);
+      pushed = !!targetId;
     }
 
     res.json({ ok: true, membership_status: status, pushed });
@@ -322,14 +329,51 @@ router.post('/members/:id/webling-push', async (req, res) => {
       }
       res.json({ ok: true, action: 'updated', webling_id: member.webling_id });
     } else {
-      const newWeblingId = await _pushMemberToWebling(member, member.membership_status);
-      res.json({ ok: true, action: 'created', webling_id: newWeblingId });
+      // Vor dem Neu-Anlegen: in Webling nach zynex_id suchen (Mitglieder ID)
+      let existingWeblingId = null;
+      if (member.zynex_id) {
+        existingWeblingId = await _findWeblingIdByZynexId(member.zynex_id);
+        if (existingWeblingId) {
+          await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [existingWeblingId, id]);
+          member.webling_id = existingWeblingId;
+        }
+      }
+      if (existingWeblingId) {
+        // Gefunden — Status aktualisieren
+        const properties = _buildWeblingProperties(member, member.membership_status);
+        await weblingService.updateMemberFields(existingWeblingId, properties);
+        res.json({ ok: true, action: 'linked', webling_id: existingWeblingId });
+      } else {
+        const newWeblingId = await _pushMemberToWebling(member, member.membership_status);
+        res.json({ ok: true, action: 'created', webling_id: newWeblingId });
+      }
     }
   } catch (err) {
     console.error('[browser/members/:id/webling-push]', err.message);
     res.status(500).json({ error: err.message || 'Server-Fehler' });
   }
 });
+
+async function _findWeblingIdByZynexId(zynexId) {
+  try {
+    const { objects: ids } = await weblingService._client().get('/member').then(r => r.data);
+    if (!ids?.length) return null;
+    // Batch-Abfrage in Gruppen von 100
+    for (let i = 0; i < ids.length; i += 100) {
+      const batch = ids.slice(i, i + 100);
+      const { data } = await weblingService._client().get('/member/' + batch.join(','));
+      const rows = Array.isArray(data) ? data : [data];
+      for (const m of rows) {
+        if (String(m.properties?.['Mitglieder ID']) === String(zynexId)) {
+          return Number(m.id);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[_findWeblingIdByZynexId]', err.message);
+  }
+  return null;
+}
 
 async function _resolvedStatus(statusText) {
   return await weblingService.resolveStatusIndex(statusText);
