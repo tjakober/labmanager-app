@@ -434,8 +434,7 @@ function _buildWeblingProperties(member, status) {
   properties['Name']      = nachname;
   properties['E-Mail P']  = member.email || properties['E-Mail P'] || '';
   properties['Status']    = status || '';
-  // Mitglieder ID nur setzen wenn explizit gewünscht (beim Create kann sie bereits vergeben sein)
-  delete properties['Mitglieder ID'];
+  if (member.zynex_id) properties['Mitglieder ID'] = member.zynex_id;
 
   return properties;
 }
@@ -488,6 +487,17 @@ async function _pushMemberToWebling(member, status) {
   try {
     result = await weblingService.createMember(properties, parents.length ? parents : null);
   } catch (err) {
+    const body = err.response?.data?.error || '';
+    // Mitglieder ID bereits vergeben → existierenden Member suchen und linken
+    if (err.response?.status === 400 && body.includes('not unique') && member.zynex_id) {
+      console.warn('[_pushMemberToWebling] Mitglieder ID bereits vergeben, suche existierenden Member...');
+      const existingId = await _findWeblingIdByZynexId(member.zynex_id);
+      if (existingId) {
+        await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [existingId, member.id]);
+        await weblingService.updateMemberFields(existingId, properties);
+        return existingId;
+      }
+    }
     console.error('[_pushMemberToWebling] HTTP', err.response?.status, JSON.stringify(err.response?.data));
     throw err;
   }
