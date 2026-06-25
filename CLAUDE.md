@@ -34,7 +34,7 @@ src/
     logService.js           insertLog(), insertBatch()
     rightService.js         checkTagRight(), getRightsForMachine()
     billingService.js       Abrechnungsformel (§5.2), createInvoice(), previewInvoice(),
-                            getInvoiceMachineLines(), generateInvoicePdf(), PDF-Builder
+                            getInvoiceMachineLines(), recalcMachineLine(), generateInvoicePdf(), PDF-Builder
     balanceService.js       deposit(), withdraw(), getBalance() via Webling
     weblingService.js       Webling REST API (Member, Balance, bookDeposit/Withdraw, bookInvoice,
                             bookGift, resolveStatusSubgroup)
@@ -111,6 +111,7 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | `logs` | Maschinen-Ereignisse (invoice_id=NULL = offener Posten) |
 | `events` | Event-Typen: start(1), stop(2), error(3), login(4), logout(5), denied(6), running(7), idle(8), running1(9) |
 | `invoices` | Rechnungen + created_by (Labmanager-ID) |
+| `invoice_machine_lines` | Maschinenzeilen pro Rechnung (persistiert, editierbar; enthält Tariffelder für Neuberechnung) |
 | `invoice_items` | Rechnungspositionen (description, quantity, unit_price, total, credit_account, is_correction) |
 | `articles` | Artikelkatalog (name, description, price, konto_nr, is_balance_deposit, active) |
 | `documents` | PDF-Rechnungen (user_id, invoice_id, type, mime_type, blob) |
@@ -145,6 +146,7 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | `webling.max_members` | number | `500` | Max. Mitglieder in Webling (nur informativ) |
 | `webling.reserve` | number | `20` | Reserve unter Maximum (nur informativ) |
 | `webling.member_group_id` | number | `0` | Webling Membergroup-ID (Haupt-Gruppe) für neue Mitglieder |
+| `invoice.labmanager_discount` | number | `50` | Rabatt auf Maschinenzeit für Labmanager in % (0 = kein Rabatt) |
 
 ## Webling Buchungs-Integration
 
@@ -231,12 +233,17 @@ node migration/zynex/run.js --phase 4  # nur Webling-Sync
 ## Rechnungs-Workflow
 
 1. Labmanager erstellt Rechnung → Invoices-Tab öffnet sich automatisch
-2. Offene Rechnung ergänzen: Artikel inline hinzufügen (Qty editierbar, Total live), Positionen löschen, **Korrektur** (Textarea + Betrag negativ möglich)
-3. Guthaben-Artikel: `credit_account` automatisch aus `artikel.konto_nr` — kein manuelles Konto
-4. Zahlungsart beim Erstellen: **Guthaben** ist ausgeblendet (nur Kasse/Twint/SumUp)
-5. PDF immer neu generiert bei Download offener Rechnung + nach Bezahlung
-6. PDF gespeichert in `documents` mit `invoice_id`
-7. Bezahlen mit Guthaben → Webling-Balance abgezogen + `webling_meta` aktualisiert
+2. Maschinenzeilen werden in `invoice_machine_lines` persistiert (nicht nur aus Logs rekonstruiert)
+3. **Laufzeit editierbar** (HH:MM): Preis wird nach Tarifformel (Perioden) neu berechnet, Total aktualisiert
+4. **Labmanager-Rabatt** (konfigurierbar, default 50%): automatisch als `is_correction`-Zeile wenn Member Labmanager-Rolle hat
+5. PDF-Struktur: Maschinenzeit → Zwischentotal → Rabatt → Artikel → Korrektur
+6. Offene Rechnung ergänzen: Artikel inline (Qty editierbar), Positionen löschen, Korrektur (Textarea + Betrag negativ möglich)
+7. Guthaben-Artikel: `credit_account` automatisch aus `artikel.konto_nr` — kein manuelles Konto
+8. Zahlungsart beim Erstellen: **Guthaben** ist ausgeblendet (nur Kasse/Twint/SumUp)
+9. PDF immer neu generiert bei Download offener Rechnung + nach Bezahlung; gespeichert in `documents`
+10. Bezahlen mit Guthaben → Webling-Balance abgezogen + `webling_meta` aktualisiert
+
+**Migration bestehende Instanzen:** `node scripts/migrate-machine-lines.js` (erstellt Tabelle + Config-Seed)
 
 ## Onboarding neuer Labmanager
 
@@ -296,7 +303,8 @@ sudo docker compose up -d --build app
 | `GET /members/summary` | labmanager | Mitglieder-Statistik: total, in_webling, by_status |
 | `GET /members` | labmanager | Mitgliederliste; 1 Treffer → Auto-Select |
 | `POST /members` | admin | Neues Mitglied |
-| `GET /members/:id` | owner/labmanager | Mitglied-Detail (inkl. mitglieder_id aus Webling) |
+| `GET /members/:id` | owner/labmanager | Mitglied-Detail (inkl. mitglieder_id + webling-Felder für eigenes Profil) |
+| `PATCH /members/:id/contact` | owner/labmanager | Kontaktdaten ändern (email + Adresse in webling_meta) |
 | `GET /members/:id/rights` | owner/labmanager | Rights |
 | `GET /members/:id/tags` | labmanager | Badges |
 | `POST /members/:id/tags` | labmanager | Badge ausgeben |
@@ -320,6 +328,7 @@ sudo docker compose up -d --build app
 | `POST /members/:id/invoice` | labmanager | Rechnung erstellen + PDF |
 | `GET /invoices/:id` | owner/labmanager | Rechnungsdetail inkl. machine_lines + items |
 | `GET /invoices/:id/pdf` | owner/labmanager | PDF (offene Rechnung: immer neu generiert) |
+| `PATCH /invoices/:id/machine-lines/:lid` | labmanager | Maschinenzeit editieren (HH:MM) → Neuberechnung + Total-Update |
 | `POST /invoices/:id/items` | labmanager/owner | Artikel zu offener Rechnung |
 | `DELETE /invoices/:id/items/:item_id` | labmanager | Position löschen |
 | `DELETE /invoices/:id` | labmanager | Rechnung stornieren (nur unpaid) |
@@ -406,6 +415,11 @@ C:\wamp64_3_3_5\bin\mysql\mysql8.3.0\bin\mysqld.exe --defaults-file="C:\wamp64_3
 | Mitglied-Status ändern + Auto-Push zu Webling (Antrag/Mitglied*/Ausgeschlossen) | Fertig |
 | Webling-Push: Adresse + Datums-Felder, Untergruppen via resolveStatusSubgroup() | Fertig |
 | Membership-History bei Status-Wechsel aktualisieren | Fertig |
+| Rechnungs-Maschinenzeilen: persistent (invoice_machine_lines), editierbar (HH:MM), Neuberechnung | Fertig |
+| Labmanager-Rabatt auf Maschinenzeit (konfigurierbar, auto. Korrekturzeile) | Fertig |
+| Artikel-Menge auf offener Rechnung editierbar | Fertig |
+| Profil: Kontaktdaten editierbar (email, Adresse, Telefon) via PATCH /members/:id/contact | Fertig |
+| Status-Edit: Webling-Button nur bei geändertem Status sichtbar | Fertig |
 
 ## Datenbankschema anwenden
 

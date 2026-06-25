@@ -3528,6 +3528,7 @@ function app() {
       try {
         const res = await this._get(`/api/browser/members/${this.user.id}`);
         const w = res.webling || {};
+        if (this.user) this.user.email = res.email || this.user.email;
         this.profileContact = {
           strasse:      w.strasse      || '',
           adresszusatz: w.adresszusatz || '',
