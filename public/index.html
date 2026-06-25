@@ -225,7 +225,7 @@
                       <dd class="font-semibold"
                         :class="(selectedMember.membership_status||'').toLowerCase().includes('ausgeschlossen') ? 'text-red-600' : 'text-blue-700'"
                         x-text="selectedMember.membership_status || selectedMember.webling.status || '–'"></dd>
-                      <button @click="memberStatusEditing = true; memberStatusValue = selectedMember.membership_status || selectedMember.webling.status || ''"
+                      <button @click="memberStatusEditing = true; memberStatusValue = selectedMember.membership_status || selectedMember.webling.status || ''; _memberStatusOrig = memberStatusValue"
                         class="text-xs text-gray-400 hover:text-blue-600">&#9998;</button>
                     </div>
                     <div x-show="memberStatusEditing" class="flex gap-2 items-center">
@@ -243,6 +243,12 @@
                       <button @click="saveMemberStatus" :disabled="memberStatusSaving"
                         class="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-40">
                         <span x-text="memberStatusSaving ? '…' : 'OK'"></span>
+                      </button>
+                      <button x-show="memberStatusValue !== _memberStatusOrig && !memberStatusSaving"
+                        @click="pushMemberToWebling"
+                        :disabled="weblingPushSaving"
+                        class="px-2 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap">
+                        <span x-text="weblingPushSaving ? '…' : '→ Webling'"></span>
                       </button>
                       <button @click="memberStatusEditing = false" class="text-xs text-gray-400 hover:text-gray-600">&#x2715;</button>
                     </div>
@@ -288,13 +294,12 @@
                     <dt class="text-xs text-gray-400 mb-0.5">Bemerkungen</dt>
                     <dd class="text-gray-600 whitespace-pre-wrap" x-text="selectedMember.webling.bemerkungen"></dd>
                   </div>
-                  <!-- Webling-Push Button -->
+                  <!-- Webling-Push Button (Adresse, immer verfügbar) -->
                   <div class="pt-2 border-t">
                     <button @click="pushMemberToWebling"
                       :disabled="weblingPushSaving"
-                      class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-40 transition-colors">
-                      <span x-text="weblingPushSaving ? 'Wird übertragen…' : (selectedMember.webling_id ? 'Status → Webling aktualisieren' : 'Adresse zu Webling pushen')"
-                      ></span>
+                      class="text-xs text-indigo-600 hover:underline disabled:opacity-40">
+                      <span x-text="weblingPushSaving ? 'Wird übertragen…' : 'Adresse zu Webling pushen'"></span>
                     </button>
                   </div>
                 </div>
@@ -620,6 +625,27 @@
                         </div>
                       </template>
 
+                      <!-- Labmanager-Rabatt (automatisch, direkt nach Zwischentotal) -->
+                      <template x-if="invoiceDetail.items.find(i => i.is_correction && String(i.description).startsWith('Labmanager-Rabatt'))">
+                        <div class="border rounded bg-green-50 p-2 text-xs flex items-center justify-between">
+                          <span class="text-green-800 font-medium"
+                            x-text="invoiceDetail.items.find(i => i.is_correction && String(i.description).startsWith('Labmanager-Rabatt')).description"></span>
+                          <span class="font-semibold tabular-nums text-green-700"
+                            x-text="'CHF ' + Number(invoiceDetail.items.find(i => i.is_correction && String(i.description).startsWith('Labmanager-Rabatt')).total).toFixed(2)"></span>
+                        </div>
+                      </template>
+
+                      <!-- Artikel-Auswahl (nur offene Rechnung, Labmanager) -->
+                      <template x-if="!inv.paymode && isLabmanager && invoiceArticles.length > 0 && !detailPendingArticle">
+                        <select @change="detailSelectArticle($event.target.value); $event.target.value=''"
+                          class="w-full border rounded px-2 py-1 text-xs mt-1 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                          <option value="">+ Artikel hinzufügen…</option>
+                          <template x-for="a in invoiceArticles" :key="a.id">
+                            <option :value="a.id" x-text="a.name"></option>
+                          </template>
+                        </select>
+                      </template>
+
                       <!-- Artikel-Tabelle (bestehende + neue Zeile) -->
                       <template x-if="invoiceDetail.items.filter(i => !i.is_correction).length > 0 || detailPendingArticle">
                         <div>
@@ -677,27 +703,6 @@
                               </template>
                             </tbody>
                           </table>
-                        </div>
-                      </template>
-
-                      <!-- Artikel-Auswahl (nur offene Rechnung, Labmanager) -->
-                      <template x-if="!inv.paymode && isLabmanager && invoiceArticles.length > 0 && !detailPendingArticle">
-                        <select @change="detailSelectArticle($event.target.value); $event.target.value=''"
-                          class="w-full border rounded px-2 py-1 text-xs mt-1 focus:outline-none focus:ring-2 focus:ring-blue-400">
-                          <option value="">+ Artikel hinzufügen…</option>
-                          <template x-for="a in invoiceArticles" :key="a.id">
-                            <option :value="a.id" x-text="a.name"></option>
-                          </template>
-                        </select>
-                      </template>
-
-                      <!-- Labmanager-Rabatt (automatisch, nicht editierbar) -->
-                      <template x-if="invoiceDetail.items.find(i => i.is_correction && String(i.description).startsWith('Labmanager-Rabatt'))">
-                        <div class="border rounded bg-green-50 p-2 text-xs flex items-center justify-between">
-                          <span class="text-green-800 font-medium"
-                            x-text="invoiceDetail.items.find(i => i.is_correction && String(i.description).startsWith('Labmanager-Rabatt')).description"></span>
-                          <span class="font-semibold tabular-nums text-green-700"
-                            x-text="'CHF ' + Number(invoiceDetail.items.find(i => i.is_correction && String(i.description).startsWith('Labmanager-Rabatt')).total).toFixed(2)"></span>
                         </div>
                       </template>
 
@@ -1350,26 +1355,85 @@
       <div class="max-w-md space-y-4">
 
         <div class="bg-white rounded-xl border p-4">
-          <h3 class="font-semibold text-gray-800 mb-3 text-sm">Passwort ändern</h3>
-          <form @submit.prevent="changePassword" class="space-y-2">
-            <div class="relative">
-              <input x-model="pwCurrent" :type="showPw ? 'text' : 'password'" placeholder="Aktuelles Passwort"
-                autocomplete="current-password"
-                class="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <button type="button" @click="showPw=!showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-                <span x-text="showPw ? '🙈' : '👁'"></span>
-              </button>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-gray-800 text-sm">Kontaktdaten</h3>
+            <button x-show="!profileContactEditing" @click="startProfileContactEdit"
+              class="text-xs text-gray-400 hover:text-blue-600">&#9998; Bearbeiten</button>
+          </div>
+          <!-- Ansicht -->
+          <dl x-show="!profileContactEditing" class="space-y-1.5 text-sm">
+            <div class="flex gap-2">
+              <dt class="text-gray-400 w-24 shrink-0">E-Mail</dt>
+              <dd x-text="user?.email || '–'"></dd>
             </div>
-            <input x-model="pwNew" :type="showPw ? 'text' : 'password'" placeholder="Neues Passwort (min. 8 Zeichen)"
-              autocomplete="new-password"
-              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <input x-model="pwConfirm" :type="showPw ? 'text' : 'password'" placeholder="Neues Passwort bestätigen"
-              autocomplete="new-password"
-              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button type="submit"
-              class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-              Passwort speichern
-            </button>
+            <div class="flex gap-2">
+              <dt class="text-gray-400 w-24 shrink-0">Strasse</dt>
+              <dd x-text="profileContact.strasse || '–'"></dd>
+            </div>
+            <div class="flex gap-2" x-show="profileContact.adresszusatz">
+              <dt class="text-gray-400 w-24 shrink-0">Zusatz</dt>
+              <dd x-text="profileContact.adresszusatz"></dd>
+            </div>
+            <div class="flex gap-2">
+              <dt class="text-gray-400 w-24 shrink-0">PLZ / Ort</dt>
+              <dd x-text="[profileContact.plz, profileContact.ort].filter(Boolean).join(' ') || '–'"></dd>
+            </div>
+            <div class="flex gap-2">
+              <dt class="text-gray-400 w-24 shrink-0">Mobile</dt>
+              <dd x-text="profileContact.mobile || '–'"></dd>
+            </div>
+            <div class="flex gap-2">
+              <dt class="text-gray-400 w-24 shrink-0">Telefon</dt>
+              <dd x-text="profileContact.telefon || '–'"></dd>
+            </div>
+          </dl>
+          <!-- Formular -->
+          <form x-show="profileContactEditing" @submit.prevent="saveProfileContact" class="space-y-2 text-sm">
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">E-Mail</label>
+              <input x-model="profileContactEdit.email" type="email" required
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Strasse</label>
+              <input x-model="profileContactEdit.strasse" type="text"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Adresszusatz</label>
+              <input x-model="profileContactEdit.adresszusatz" type="text"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex gap-2">
+              <div class="w-24 shrink-0">
+                <label class="block text-xs text-gray-500 mb-0.5">PLZ</label>
+                <input x-model="profileContactEdit.plz" type="text"
+                  class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <div class="flex-1">
+                <label class="block text-xs text-gray-500 mb-0.5">Ort</label>
+                <input x-model="profileContactEdit.ort" type="text"
+                  class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Mobile</label>
+              <input x-model="profileContactEdit.mobile" type="tel"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-0.5">Telefon</label>
+              <input x-model="profileContactEdit.telefon" type="tel"
+                class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="flex gap-2 pt-1">
+              <button type="submit" :disabled="profileContactSaving"
+                class="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+                <span x-text="profileContactSaving ? 'Speichern…' : 'Speichern'"></span>
+              </button>
+              <button type="button" @click="profileContactEditing = false"
+                class="px-4 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">Abbrechen</button>
+            </div>
           </form>
         </div>
 
@@ -1939,6 +2003,7 @@ function app() {
     giftSaving: false,
     memberStatusEditing: false,
     memberStatusValue: '',
+    _memberStatusOrig: '',
     memberStatusSaving: false,
     weblingPushSaving: false,
 
@@ -1992,9 +2057,10 @@ function app() {
     woblingSyncResult: '',
 
     // ── Profile ───────────────────────────────────────────────────────────────
-    pwCurrent: '',
-    pwNew: '',
-    pwConfirm: '',
+    profileContact: { strasse: '', adresszusatz: '', plz: '', ort: '', mobile: '', telefon: '' },
+    profileContactEdit: {},
+    profileContactEditing: false,
+    profileContactSaving: false,
     prefWeekday: '',
     prefPriority: 5,
     prefMaxPerMonth: 4,
@@ -2133,7 +2199,7 @@ function app() {
       }
       if (id === 'assignments')    await this.loadAssignments();
       if (id === 'settings')       await this.loadSettings();
-      if (id === 'profile')        await this.loadPreferences();
+      if (id === 'profile')        { await this.loadPreferences(); await this.loadProfileContact(); }
       if (id === 'machine-status') await this._startMachineStatusPoll();
       if (id === 'my-account')     await this.loadMyAccount();
     },
@@ -3455,6 +3521,47 @@ function app() {
         const res = await this._get('/api/auth/badge-login-status');
         this.badgeLoginEnabled = !!res.badge_login_enabled;
       } catch (_) {}
+    },
+
+    async loadProfileContact() {
+      if (!this.user?.id) return;
+      try {
+        const res = await this._get(`/api/browser/members/${this.user.id}`);
+        const w = res.webling || {};
+        this.profileContact = {
+          strasse:      w.strasse      || '',
+          adresszusatz: w.adresszusatz || '',
+          plz:          w.plz          || '',
+          ort:          w.ort          || '',
+          mobile:       w.mobile       || '',
+          telefon:      w.telefon      || '',
+        };
+      } catch (_) {}
+    },
+
+    startProfileContactEdit() {
+      this.profileContactEdit = {
+        email:        this.user?.email || '',
+        ...JSON.parse(JSON.stringify(this.profileContact)),
+      };
+      this.profileContactEditing = true;
+    },
+
+    async saveProfileContact() {
+      if (this.profileContactSaving) return;
+      this.profileContactSaving = true;
+      try {
+        await this._patch(`/api/browser/members/${this.user.id}/contact`, this.profileContactEdit);
+        // E-Mail im user-Objekt aktualisieren
+        if (this.user) this.user.email = this.profileContactEdit.email;
+        Object.assign(this.profileContact, this.profileContactEdit);
+        this.profileContactEditing = false;
+        this.showToast('Kontaktdaten gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.profileContactSaving = false;
+      }
     },
 
     async changePassword() {

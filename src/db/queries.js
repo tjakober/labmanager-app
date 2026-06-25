@@ -140,6 +140,9 @@ module.exports = {
   updateWeblingMeta: `
     UPDATE users SET webling_meta = ? WHERE webling_id = ?`,
 
+  updateMemberContact: `
+    UPDATE users SET email = ?, webling_meta = ? WHERE id = ?`,
+
   getUserIdByWeblingId: `
     SELECT id FROM users WHERE webling_id = ?`,
 

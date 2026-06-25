@@ -206,9 +206,9 @@ router.get('/members/:id', async (req, res) => {
     if (!member) return res.status(404).json({ error: 'Mitglied nicht gefunden' });
     const knowledge = await db.query(Q.getMemberKnowledge, [id]);
 
-    // Parse webling_meta for address/contact/status fields (labmanager/admin only)
+    // Parse webling_meta for address/contact/status fields (own profile or labmanager/admin)
     let webling = null;
-    if (isPrivileged && member.webling_meta) {
+    if ((isOwn || isPrivileged) && member.webling_meta) {
       try {
         const meta = JSON.parse(member.webling_meta);
         const p = meta.properties || {};
@@ -294,6 +294,47 @@ router.patch('/members/:id/status', async (req, res) => {
     res.json({ ok: true, membership_status: status, pushed });
   } catch (err) {
     console.error('[browser/members/:id/status]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
+ * PATCH /api/browser/members/:id/contact
+ * Eigene Kontaktdaten ändern (Email lokal + Adresse/Telefon in webling_meta).
+ * Mitglieder dürfen nur eigene Daten ändern; Labmanager/Admin alle.
+ * Body: { email?, strasse?, adresszusatz?, plz?, ort?, mobile?, telefon? }
+ */
+router.patch('/members/:id/contact', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const isOwn        = req.user.id === id;
+  const isPrivileged = req.user.roles.some(r => ['admin', 'labmanager'].includes(r));
+  if (!isOwn && !isPrivileged) return res.status(403).json({ error: 'Keine Berechtigung' });
+
+  const { email, strasse, adresszusatz, plz, ort, mobile, telefon } = req.body;
+
+  try {
+    const member = await db.queryOne(Q.getMemberById, [id]);
+    if (!member) return res.status(404).json({ error: 'Mitglied nicht gefunden' });
+
+    const newEmail = (email || '').trim() || member.email;
+
+    // webling_meta mergen
+    let meta = {};
+    try { meta = member.webling_meta ? JSON.parse(member.webling_meta) : {}; } catch {}
+    if (!meta.properties) meta.properties = {};
+    const p = meta.properties;
+    if (strasse      !== undefined) p['Strasse']       = strasse;
+    if (adresszusatz !== undefined) p['Adresszusatz']  = adresszusatz;
+    if (plz          !== undefined) p['PLZ']           = plz;
+    if (ort          !== undefined) p['Ort']           = ort;
+    if (mobile       !== undefined) p['Mobile P']      = mobile;
+    if (telefon      !== undefined) p['Telefon P']     = telefon;
+    if (email        !== undefined) p['E-Mail P']      = newEmail;
+
+    await db.query(Q.updateMemberContact, [newEmail, JSON.stringify(meta), id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[browser/members/:id/contact]', err.message);
     res.status(500).json({ error: err.message || 'Server-Fehler' });
   }
 });
