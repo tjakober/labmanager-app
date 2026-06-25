@@ -36,7 +36,8 @@ src/
     billingService.js       Abrechnungsformel (§5.2), createInvoice(), previewInvoice(),
                             getInvoiceMachineLines(), generateInvoicePdf(), PDF-Builder
     balanceService.js       deposit(), withdraw(), getBalance() via Webling
-    weblingService.js       Webling REST API (Member, Balance, bookDeposit/Withdraw, bookInvoice)
+    weblingService.js       Webling REST API (Member, Balance, bookDeposit/Withdraw, bookInvoice,
+                            bookGift, resolveStatusSubgroup)
     weblingSync.js          Täglicher Sync + Membership-History schreiben + Sync-Log
     upgradeService.js       revertExpiredUpgrades() + Webling/Mail/Slack
     calendarSync.js         Google Calendar OAuth2, createAssignmentEvent() etc.
@@ -133,6 +134,8 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | Key | Typ | Default | Zweck |
 |---|---|---|---|
 | `balance.max_deposit` | number | `500` | Max. Guthaben pro Mitglied (CHF) |
+| `balance.gift_credit_account` | string | `''` | Webling-Konto HABEN bei Guthaben-Schenkung (z.B. `1001`) |
+| `balance.gift_accounts` | json | `[]` | Konti für Guthaben-Schenkung: `[{konto_nr, bezeichnung, fachgruppe?}]` |
 | `right.default_days` | number | `365` | Standard-Laufzeit für neue Maschinenrechte in Tagen |
 | `tag.deposit_amount` | number | `20` | Depot-Gebühr für Ersatzkarte (CHF) |
 | `upgrade.expire_notify_emails` | json | `[]` | Empfänger bei Upgrade-Ablauf |
@@ -141,6 +144,7 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | `webling.fachgruppe_roles` | json | `{"LabManager":"labmanager","ICT":"admin"}` | Fachgruppe → lokale Rolle |
 | `webling.max_members` | number | `500` | Max. Mitglieder in Webling (nur informativ) |
 | `webling.reserve` | number | `20` | Reserve unter Maximum (nur informativ) |
+| `webling.member_group_id` | number | `0` | Webling Membergroup-ID (Haupt-Gruppe) für neue Mitglieder |
 
 ## Webling Buchungs-Integration
 
@@ -172,7 +176,7 @@ Eintrags-Typen (`_typ`):
 
 `weblingSync.runSync()` — täglich 02:00 UTC + manuell auslösbar:
 
-**Webling führt** — kein Push aus der App nach Webling. Neue Mitglieder werden ausschliesslich in Webling erfasst oder via Migration (`migration/zynex/run.js`) übernommen.
+**Webling führt** — Sync ist read-only (kein Push aus App nach Webling). Neue Mitglieder werden in Webling erfasst oder via Migration übernommen. **Ausnahme:** Manueller Push aus dem Mitglied-Detail (Labmanager-Funktion).
 
 **Phase 1:** Mitglieder-Upsert (Webling → DB), `webling_meta`-Backup, lokale Upgrades + Membership-Events schreiben. Match-Priorität: `webling_id` → `zynex_id` (= Webling `Mitglieder ID`) → E-Mail. Duplikat-User ohne `zynex_id` bei E-Mail-Konflikt werden gelöscht.
 
@@ -183,6 +187,28 @@ Eintrags-Typen (`_typ`):
 **Wildcard in active_statuses:** `"Mitglied*"` trifft auf alle Jahres-/Typ-Kombinationen
 
 **Log:** `logs/webling-sync.log` — alle Sync-Läufe mit Timestamp, übersprungene Mitglieder (mit Grund)
+
+## Webling-Push (Mitglied-Detail)
+
+Labmanager können im Info-Tab eines Mitglieds den Status ändern und die Adresse manuell zu Webling pushen.
+
+**Status-Dropdown:** Antrag · Mitglied [Jahr] Basis/Premium/Kommerziell · Ex-Mitglied · Extern · Ausgeschlossen
+
+**Auto-Push** bei Statuswechsel auf Antrag, Mitglied* oder Ausgeschlossen:
+- Webling-Status wird aktualisiert
+- Datums-Felder werden gesetzt: `Datum Antrag` (Antrag, nur wenn leer), `Eintrittsdatum` (Mitglied*, nur wenn leer), `Austrittsdatum` (Ex-Mitglied/Ausgeschlossen, immer)
+- Membership-History wird ergänzt
+
+**Manueller Push-Button:** Überträgt alle Adressfelder aus `webling_meta` + aktuellen Status.
+
+**Lookup-Logik beim Erstellen:**
+1. Suche in Webling nach `Mitglieder ID` = `zynex_id` (Batch-Scan aller Members)
+2. Gefunden → `webling_id` in DB setzen + Update
+3. Nicht gefunden → neuen Webling-Member anlegen mit `Mitglieder ID` = `zynex_id`
+4. Webling gibt "not unique" → existierenden Member via Batch-Scan finden und linken
+5. Parents: `webling.member_group_id` (Haupt) + Untergruppe via `resolveStatusSubgroup()` (lädt Kinder der Haupt-Gruppe, matched Titel gegen Status-String)
+
+**Feldname-Whitelist** (verhindert unbekannte Felder): Vorname, Name, E-Mail P/G, Status, Mitglieder ID, Strasse, Adresszusatz, PLZ, Ort, Land, Telefon P/G, Mobile P/G, Firma, Anrede, Geburtsdatum, Eintrittsdatum, Austrittsdatum, Funktion, Bemerkungen, Datum Antrag
 
 ## Zynex Datenübernahme
 
@@ -257,12 +283,10 @@ sudo docker compose up -d --build app
 ### Auth
 | Route | Auth | Zweck |
 |---|---|---|
-| `POST /api/auth/login` | — | E-Mail + Passwort → JWT |
+| `POST /api/auth/login` | — | E-Mail + Passwort → JWT (nur intern/admin) |
 | `POST /api/auth/reset-request` | — | Passwort-Reset per E-Mail |
 | `POST /api/auth/reset-confirm` | — | Neues Passwort setzen |
-| `POST /api/auth/badge-login` | — | RFID → JWT |
-| `GET /api/auth/badge-login-status` | JWT | Badge-Login Status |
-| `PUT /api/auth/badge-login-toggle` | JWT | Badge-Login toggle |
+| `POST /api/auth/badge-login` | — | RFID → JWT (immer aktiv, Mitgliedschaftsprüfung + Januar-Toleranz) |
 
 ### Browser-SPA (`/api/browser/*`)
 | Route | Rolle | Zweck |
@@ -287,6 +311,10 @@ sudo docker compose up -d --build app
 | `PUT /rights/:id` | labmanager | Gültigkeitsdaten |
 | `DELETE /rights/:id` | labmanager | Recht entfernen |
 | `GET /members/:id/balance` | owner/labmanager | Guthaben |
+| `POST /members/:id/balance/gift` | labmanager | Guthaben schenken (Webling-Buchung) |
+| `PATCH /members/:id/status` | labmanager | membership_status ändern + Auto-Push Webling |
+| `POST /members/:id/webling-push` | labmanager | Adresse manuell zu Webling pushen |
+| `GET /gift-accounts` | labmanager | Konfigurierte Schenkungskonti (gefiltert nach Fachgruppe) |
 | `GET /members/:id/invoices` | owner/labmanager | Rechnungsliste |
 | `GET /members/:id/invoice/preview` | owner/labmanager | Vorschau offene Posten |
 | `POST /members/:id/invoice` | labmanager | Rechnung erstellen + PDF |
@@ -373,6 +401,11 @@ C:\wamp64_3_3_5\bin\mysql\mysql8.3.0\bin\mysqld.exe --defaults-file="C:\wamp64_3
 | Docker-Deployment (Synology NAS / Raspberry Pi) | Fertig |
 | Mitglieder-Übersicht Dashboard (Summary ohne Auswahl) | Fertig |
 | Webling-Sync: nur Lesen (Webling führt, kein Push aus App) | Fertig |
+| Badge-Login: nur RFID, immer aktiv, Mitgliedschaftsprüfung + Januar-Toleranz | Fertig |
+| Guthaben schenken (Labmanager, konfigurierbare Konti, Fachgruppen-Einschränkung) | Fertig |
+| Mitglied-Status ändern + Auto-Push zu Webling (Antrag/Mitglied*/Ausgeschlossen) | Fertig |
+| Webling-Push: Adresse + Datums-Felder, Untergruppen via resolveStatusSubgroup() | Fertig |
+| Membership-History bei Status-Wechsel aktualisieren | Fertig |
 
 ## Datenbankschema anwenden
 
