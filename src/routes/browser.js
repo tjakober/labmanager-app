@@ -268,7 +268,8 @@ router.patch('/members/:id/status', async (req, res) => {
     const shouldPush = sl === 'antrag' || sl.startsWith('mitglied') || sl === 'ausgeschlossen';
     if (shouldPush && member.webling_id) {
       try {
-        await weblingService.updateMemberFields(member.webling_id, { Status: status });
+        const fields = await _statusDateFields(member.webling_id, status);
+        await weblingService.updateMemberFields(member.webling_id, { Status: status, ...fields });
       } catch (pushErr) {
         const body = JSON.stringify(pushErr.response?.data);
         console.error(`[status/webling-push] HTTP ${pushErr.response?.status} body=${body}`);
@@ -281,7 +282,8 @@ router.patch('/members/:id/status', async (req, res) => {
       let targetId = member.zynex_id ? await _findWeblingIdByZynexId(member.zynex_id) : null;
       if (targetId) {
         await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [targetId, id]);
-        await weblingService.updateMemberFields(targetId, { Status: status });
+        const fields = await _statusDateFields(targetId, status);
+        await weblingService.updateMemberFields(targetId, { Status: status, ...fields });
       } else {
         targetId = await _pushMemberToWebling(member, status);
       }
@@ -373,6 +375,30 @@ async function _findWeblingIdByZynexId(zynexId) {
     console.warn('[_findWeblingIdByZynexId]', err.message);
   }
   return null;
+}
+
+/**
+ * Gibt Datums-Felder zurück die beim Statuswechsel gesetzt werden sollen.
+ * Antrag → Datum Antrag (nur wenn leer)
+ * Mitglied* → Eintrittsdatum (nur wenn leer)
+ * Ex-Mitglied / Ausgeschlossen → Austrittsdatum (immer)
+ */
+async function _statusDateFields(weblingId, status) {
+  const today = new Date().toISOString().slice(0, 10);
+  const sl = status.toLowerCase();
+  const fields = {};
+  try {
+    const wm = await weblingService.getMember(weblingId);
+    const p  = wm?.properties || {};
+    if (sl === 'antrag' && !p['Datum Antrag']) {
+      fields['Datum Antrag'] = today;
+    } else if (sl.startsWith('mitglied') && !p['Eintrittsdatum']) {
+      fields['Eintrittsdatum'] = today;
+    } else if (sl === 'ex-mitglied' || sl === 'ausgeschlossen') {
+      fields['Austrittsdatum'] = today;
+    }
+  } catch { /* ignore, Datums-Felder optional */ }
+  return fields;
 }
 
 // Bekannte Webling-Feldnamen (Whitelist verhindert unbekannte Felder wie Status1)
@@ -468,6 +494,11 @@ async function _pushMemberToWebling(member, status) {
   const weblingId = typeof result === 'number' ? result : (result?.id ?? result);
   if (weblingId) {
     await db.query('UPDATE users SET webling_id = ? WHERE id = ?', [weblingId, member.id]);
+    // Datums-Felder nach Erstellen setzen (Member existiert jetzt in Webling)
+    const dateFields = await _statusDateFields(weblingId, status);
+    if (Object.keys(dateFields).length) {
+      await weblingService.updateMemberFields(weblingId, dateFields).catch(() => {});
+    }
   }
   return weblingId;
 }
