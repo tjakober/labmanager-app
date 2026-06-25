@@ -2,6 +2,7 @@
 
 const express        = require('express');
 const bcrypt         = require('bcrypt');
+const { spawn }      = require('child_process');
 const db             = require('../db/pool');
 const Q              = require('../db/queries');
 const billingService  = require('../services/billingService');
@@ -1682,6 +1683,69 @@ router.post('/webling/sync', requireRole('admin'), async (req, res) => {
     console.error('[browser/webling/sync]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── SQL Export (admin) ────────────────────────────────────────────────────────
+
+router.get('/export/sql', requireRole('admin'), async (req, res) => {
+  const cfg = require('../config');
+  const db_cfg = cfg.db;
+
+  const now = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/sql');
+  res.setHeader('Content-Disposition', `attachment; filename="fablabwinti-export-${now}.sql"`);
+
+  // Sensible Tabellen weglassen
+  const ignoreTables = ['api_keys', 'password_resets'];
+  const ignoreArgs = ignoreTables.flatMap(t => [`--ignore-table=${db_cfg.database}.${t}`]);
+
+  const args = [
+    `-h${db_cfg.host}`,
+    `-P${db_cfg.port || 3306}`,
+    `-u${db_cfg.user}`,
+    `--password=${db_cfg.password}`,
+    '--single-transaction',
+    '--skip-comments',
+    '--set-charset',
+    '--default-character-set=utf8mb4',
+    ...ignoreArgs,
+    db_cfg.database,
+  ];
+
+  // Docker: mariadb-dump; lokale Entwicklung: mysqldump
+  const cmd = process.env.DB_DUMP_CMD || (process.env.NODE_ENV === 'production' ? 'mariadb-dump' : 'mysqldump');
+  const dump = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  dump.stderr.on('data', d => console.error('[export/sql]', d.toString().trim()));
+
+  // Passwort-Hashes in users-Tabelle anonymisieren
+  let buffer = '';
+  dump.stdout.on('data', chunk => {
+    buffer += chunk.toString();
+    // Flush vollständige Zeilen, behalte letzte unvollständige
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    const out = lines.map(line =>
+      line.replace(/(')\$2[aby]\$\d{2}\$[A-Za-z0-9./]{53}(')/g, "'***'")
+    ).join('\n') + '\n';
+    res.write(out);
+  });
+
+  dump.on('close', code => {
+    if (buffer) {
+      res.write(buffer.replace(/(')\$2[aby]\$\d{2}\$[A-Za-z0-9./]{53}(')/g, "'***'"));
+    }
+    if (code !== 0 && !res.headersSent) {
+      return res.status(500).json({ error: 'mysqldump fehlgeschlagen' });
+    }
+    res.end();
+  });
+
+  dump.on('error', err => {
+    console.error('[export/sql] spawn error:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'mysqldump nicht verfügbar' });
+    else res.end();
+  });
 });
 
 module.exports = router;

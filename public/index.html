@@ -1474,6 +1474,24 @@
       </div>
     </div>
 
+    <!-- ══ Export ════════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'export'" class="p-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-5">Datenexport</h2>
+      <div class="max-w-md space-y-4">
+        <div class="bg-white rounded-xl border p-4">
+          <h3 class="font-semibold text-gray-800 text-sm mb-2">SQL-Dump</h3>
+          <p class="text-xs text-gray-500 mb-4">Vollständiger Export aller Tabellen als SQL-Datei (ohne Passwörter und API-Keys).</p>
+          <button @click="downloadSqlExport()"
+            :disabled="exportLoading"
+            class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+            <span x-show="!exportLoading">💾 SQL herunterladen</span>
+            <span x-show="exportLoading">⏳ Wird erstellt…</span>
+          </button>
+          <p x-show="exportError" x-text="exportError" class="mt-2 text-xs text-red-600"></p>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div><!-- /app shell -->
 
@@ -2061,6 +2079,8 @@ function app() {
     profileContactEdit: {},
     profileContactEditing: false,
     profileContactSaving: false,
+    exportLoading: false,
+    exportError: '',
     prefWeekday: '',
     prefPriority: 5,
     prefMaxPerMonth: 4,
@@ -2125,6 +2145,7 @@ function app() {
       if (this.isLabmanager) items.push({ id: 'assignments', icon: '📅', label: 'Einsatzplanung' });
       if (this.isLabmanager) items.push({ id: 'machine-status', icon: '🖥️', label: 'Belegung' });
       if (this.isLabmanager) items.push({ id: 'settings',    icon: '⚙️', label: 'Einstellungen' });
+      if (this.isAdmin)      items.push({ id: 'export',     icon: '💾', label: 'Datenexport' });
       items.push(              { id: 'profile',    icon: '👤', label: 'Profil' });
       return items;
     },
@@ -3562,6 +3583,32 @@ function app() {
         this.showToast(err.message, 'error');
       } finally {
         this.profileContactSaving = false;
+      }
+    },
+
+    async downloadSqlExport() {
+      this.exportLoading = true;
+      this.exportError = '';
+      try {
+        const r = await fetch('/api/browser/export/sql', {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.error || 'Export fehlgeschlagen');
+        }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const now = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `fablabwinti-export-${now}.sql`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        this.exportError = err.message;
+      } finally {
+        this.exportLoading = false;
       }
     },
 
