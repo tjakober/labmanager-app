@@ -100,17 +100,6 @@ async function previewInvoice(userId) {
   }));
 }
 
-async function getInvoiceMachineLines(invoiceId) {
-  const logRows = await db.query(Q.getLogsForInvoice, [invoiceId]);
-  return pairSessions(logRows).map(s => ({
-    machine_name: s.machine_name,
-    usageSeconds: s.usageSeconds,
-    startIso:     s.startIso,
-    konto_nr:     s.konto_nr,
-    price:        +calcMachinePrice(s.usageSeconds, s).toFixed(2),
-  }));
-}
-
 async function createInvoice(userId, paymodeId = null, extraItems = [], createdBy = null) {
   const logs     = await db.query(Q.getOpenLogsForUser, [userId]);
   const sessions = pairSessions(logs);
@@ -122,12 +111,18 @@ async function createInvoice(userId, paymodeId = null, extraItems = [], createdB
   const lines = sessions.map(s => ({
     machine_id:   s.machine_id,
     machine_name: s.machine_name,
+    period:       s.period,
+    min_periods:  s.min_periods,
+    min_price:    s.min_price,
+    price:        s.price,
     usageSeconds: s.usageSeconds,
-    price:        +calcMachinePrice(s.usageSeconds, s).toFixed(2),
+    konto_nr:     s.konto_nr,
+    startIso:     s.startIso,
+    linePrice:    +calcMachinePrice(s.usageSeconds, s).toFixed(2),
     logIds:       s.logIds,
   }));
 
-  const machineTotal = +lines.reduce((sum, l) => sum + l.price, 0).toFixed(2);
+  const machineTotal = +lines.reduce((sum, l) => sum + l.linePrice, 0).toFixed(2);
   const itemsTotal   = +extraItems.reduce((sum, i) => sum + i.quantity * i.unit_price, 0).toFixed(2);
   const total        = +(machineTotal + itemsTotal).toFixed(2);
   const allIds       = lines.flatMap(l => l.logIds);
@@ -144,6 +139,25 @@ async function createInvoice(userId, paymodeId = null, extraItems = [], createdB
 
     if (allIds.length) {
       await conn.query(Q.markLogsInvoiced, [invoiceId, allIds]);
+    }
+
+    // Maschinenzeilen in neue Tabelle schreiben
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      await conn.query(Q.insertMachineLine, [
+        invoiceId,
+        l.machine_id,
+        l.machine_name,
+        l.usageSeconds,
+        l.period,
+        l.min_periods,
+        l.min_price != null ? parseFloat(l.min_price) : null,
+        parseFloat(l.price),
+        l.linePrice,
+        l.konto_nr || null,
+        l.startIso || null,
+        i,
+      ]);
     }
 
     for (const item of extraItems) {
@@ -164,25 +178,66 @@ async function createInvoice(userId, paymodeId = null, extraItems = [], createdB
   return { invoiceId, total, lines };
 }
 
+/**
+ * Berechnet den Preis einer Maschinenzeile neu anhand der gespeicherten Tariffelder.
+ * Wird aufgerufen wenn der Benutzer die Nutzungszeit einer Zeile ändert.
+ */
+async function recalcMachineLine(invoiceId, lineId, newUsageSeconds) {
+  const rows = await db.query(Q.getMachineLines, [invoiceId]);
+  const line = rows.find(r => Number(r.id) === Number(lineId));
+  if (!line) throw new Error(`Maschinenzeile ${lineId} nicht gefunden`);
+
+  const newPrice = +calcMachinePrice(newUsageSeconds, {
+    period:      Number(line.period),
+    min_periods: Number(line.min_periods),
+    min_price:   line.min_price != null ? parseFloat(line.min_price) : null,
+    price:       parseFloat(line.price),
+  }).toFixed(2);
+
+  await db.query(Q.updateMachineLineUsage, [newUsageSeconds, newPrice, lineId, invoiceId]);
+  return { usage_seconds: newUsageSeconds, line_price: newPrice };
+}
+
+/**
+ * Liest Maschinenzeilen aus invoice_machine_lines.
+ * Fallback auf Logs-Rekonstruktion falls keine Zeilen vorhanden (Altdaten).
+ */
+async function getInvoiceMachineLines(invoiceId) {
+  const rows = await db.query(Q.getMachineLines, [invoiceId]);
+  if (rows.length > 0) {
+    return rows.map(r => ({
+      id:           Number(r.id),
+      machine_id:   r.machine_id ? Number(r.machine_id) : null,
+      machine_name: r.machine_name,
+      usageSeconds: Number(r.usage_seconds),
+      startIso:     r.start_iso || null,
+      konto_nr:     r.konto_nr || null,
+      price:        parseFloat(r.line_price),
+    }));
+  }
+  // Fallback: aus Logs rekonstruieren (Rechnungen vor Migration)
+  const logRows = await db.query(Q.getLogsForInvoice, [invoiceId]);
+  return pairSessions(logRows).map(s => ({
+    id:           null,
+    machine_name: s.machine_name,
+    usageSeconds: s.usageSeconds,
+    startIso:     s.startIso,
+    konto_nr:     s.konto_nr,
+    price:        +calcMachinePrice(s.usageSeconds, s).toFixed(2),
+  }));
+}
+
 async function generateInvoicePdf(invoiceId, userId) {
   const invoice = await db.queryOne(Q.getInvoiceWithItems, [invoiceId]);
   if (!invoice) throw new Error(`Rechnung ${invoiceId} nicht gefunden`);
 
-  const [logRows, invoiceItems] = await Promise.all([
-    db.query(Q.getLogsForInvoice, [invoiceId]),
-    db.query(Q.getInvoiceItems,   [invoiceId]),
+  const [machineLines, invoiceItems] = await Promise.all([
+    getInvoiceMachineLines(invoiceId),
+    db.query(Q.getInvoiceItems, [invoiceId]),
   ]);
-
-  const machineLines = pairSessions(logRows).map(s => ({
-    machine_name: s.machine_name,
-    usageSeconds: s.usageSeconds,
-    startIso:     s.startIso,
-    price:        +calcMachinePrice(s.usageSeconds, s).toFixed(2),
-  }));
 
   const pdfBuffer = await buildPdf(invoice, machineLines, invoiceItems);
 
-  // Altes PDF für diese Rechnung löschen, dann neues speichern
   await db.query(Q.deleteInvoicePdf, [invoiceId]);
   const result = await db.query(Q.storeInvoicePdf, [userId, invoiceId, pdfBuffer]);
   return Number(result.insertId);
@@ -243,25 +298,26 @@ function buildPdf(invoice, machineLines = [], articleItems = []) {
     if (invoice.paymode) doc.text(`Zahlungsart: ${invoice.paymode}`);
     doc.moveDown();
 
-    // Positionen
-    const hasLines = machineLines.length > 0 || articleItems.length > 0;
-    if (hasLines) {
-      doc.fontSize(11).fillColor('black').text('Positionen:', { underline: true });
+    const regularItems = articleItems.filter(i => !i.is_correction);
+    const corrItems    = articleItems.filter(i => !!i.is_correction);
+
+    // ── Maschinenzeilen ──
+    if (machineLines.length > 0) {
+      doc.fontSize(11).fillColor('black').text('Maschinenzeit:', { underline: true });
       doc.moveDown(0.4);
 
-      // Table header
       const headerY = doc.y;
       doc.fontSize(8).fillColor('#888888');
-      doc.text('Maschine',   COL.machine,   headerY, { width: COL.start - COL.machine - 4 });
-      doc.text('Start',      COL.start,     headerY, { width: COL.duration - COL.start - 4 });
-      doc.text('Laufzeit',   COL.duration,  headerY, { width: COL.amount - COL.duration - 4 });
-      doc.text('Betrag',     COL.amount,    headerY, { width: R - COL.amount, align: 'right' });
+      doc.text('Maschine',  COL.machine,  headerY, { width: COL.start - COL.machine - 4 });
+      doc.text('Start',     COL.start,    headerY, { width: COL.duration - COL.start - 4 });
+      doc.text('Laufzeit',  COL.duration, headerY, { width: COL.amount - COL.duration - 4 });
+      doc.text('Betrag',    COL.amount,   headerY, { width: R - COL.amount, align: 'right' });
       doc.moveDown(0.2);
       doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor('#cccccc').stroke();
       doc.moveDown(0.3);
 
       doc.fontSize(10).fillColor('black');
-
+      let machineSubtotal = 0;
       for (const line of machineLines) {
         const y = doc.y;
         doc.text(line.machine_name,                COL.machine,  y, { width: COL.start - COL.machine - 4 });
@@ -269,45 +325,65 @@ function buildPdf(invoice, machineLines = [], articleItems = []) {
         doc.text(fmtDuration(line.usageSeconds),   COL.duration, y, { width: COL.amount - COL.duration - 4 });
         doc.text(Number(line.price).toFixed(2),    COL.amount,   y, { width: R - COL.amount, align: 'right' });
         doc.moveDown(0.5);
+        machineSubtotal += Number(line.price);
       }
 
-      if (articleItems.length > 0) {
-        if (machineLines.length > 0) {
-          doc.moveDown(0.3);
-          doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor('#eeeeee').stroke();
-          doc.moveDown(0.3);
-        }
-        // Artikel-Header
-        const artHeaderY = doc.y;
-        doc.fontSize(8).fillColor('#888888');
-        doc.text('Artikel',    COL.machine,   artHeaderY, { width: COL.start - COL.machine - 4 });
-        doc.text('Stk.',       COL.start,     artHeaderY, { width: COL.duration - COL.start - 4, align: 'right' });
-        doc.text('Einzelpr.',  COL.duration,  artHeaderY, { width: COL.amount - COL.duration - 4, align: 'right' });
-        doc.text('Betrag',     COL.amount,    artHeaderY, { width: R - COL.amount, align: 'right' });
-        doc.moveDown(0.2);
-        doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor('#cccccc').stroke();
-        doc.moveDown(0.3);
+      // Zwischentotal Maschinenzeit
+      doc.moveDown(0.1);
+      doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor('#cccccc').stroke();
+      doc.moveDown(0.3);
+      const stY = doc.y;
+      doc.fontSize(9).fillColor('#444444');
+      doc.text('Zwischentotal Maschinenzeit', COL.machine, stY, { width: COL.amount - COL.machine - 4 });
+      doc.text(machineSubtotal.toFixed(2), COL.amount, stY, { width: R - COL.amount, align: 'right' });
+      doc.fillColor('black').fontSize(10);
+      doc.moveDown(1.0);
+    }
 
-        doc.fontSize(10).fillColor('black');
-        for (const item of articleItems) {
-          const qty      = Number(item.quantity);
-          const unitP    = Number(item.unit_price);
-          const total    = Number(item.total);
-          const isCorr   = !!item.is_correction;
-          const y        = doc.y;
+    // ── Artikel ──
+    if (regularItems.length > 0) {
+      doc.fontSize(11).fillColor('black').text('Artikel:', { underline: true });
+      doc.moveDown(0.4);
 
-          doc.text(item.description, COL.machine, y, { width: COL.start - COL.machine - 4 });
-          if (!isCorr) {
-            doc.text(String(qty),           COL.start,    y, { width: COL.duration - COL.start - 4, align: 'right' });
-            doc.text(unitP.toFixed(2),      COL.duration, y, { width: COL.amount - COL.duration - 4, align: 'right' });
-          }
-          doc.fillColor(total < 0 ? 'red' : 'black')
-             .text(total.toFixed(2),        COL.amount,   y, { width: R - COL.amount, align: 'right' });
-          doc.fillColor('black');
-          doc.moveDown(0.5);
-        }
+      const artHeaderY = doc.y;
+      doc.fontSize(8).fillColor('#888888');
+      doc.text('Artikel',   COL.machine,  artHeaderY, { width: COL.start - COL.machine - 4 });
+      doc.text('Stk.',      COL.start,    artHeaderY, { width: COL.duration - COL.start - 4, align: 'right' });
+      doc.text('Einzelpr.', COL.duration, artHeaderY, { width: COL.amount - COL.duration - 4, align: 'right' });
+      doc.text('Betrag',    COL.amount,   artHeaderY, { width: R - COL.amount, align: 'right' });
+      doc.moveDown(0.2);
+      doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor('#cccccc').stroke();
+      doc.moveDown(0.3);
+
+      doc.fontSize(10).fillColor('black');
+      for (const item of regularItems) {
+        const qty   = Number(item.quantity);
+        const unitP = Number(item.unit_price);
+        const total = Number(item.total);
+        const y     = doc.y;
+        doc.text(item.description, COL.machine,  y, { width: COL.start - COL.machine - 4 });
+        doc.text(String(qty),      COL.start,    y, { width: COL.duration - COL.start - 4, align: 'right' });
+        doc.text(unitP.toFixed(2), COL.duration, y, { width: COL.amount - COL.duration - 4, align: 'right' });
+        doc.text(total.toFixed(2), COL.amount,   y, { width: R - COL.amount, align: 'right' });
+        doc.moveDown(0.5);
       }
+    }
 
+    // ── Korrekturen ──
+    if (corrItems.length > 0) {
+      doc.moveDown(0.3);
+      for (const item of corrItems) {
+        const total = Number(item.total);
+        const y     = doc.y;
+        doc.fontSize(10).fillColor(total < 0 ? 'red' : 'black');
+        doc.text(item.description, COL.machine, y, { width: COL.amount - COL.machine - 4 });
+        doc.text(total.toFixed(2), COL.amount,  y, { width: R - COL.amount, align: 'right' });
+        doc.fillColor('black');
+        doc.moveDown(0.5);
+      }
+    }
+
+    if (machineLines.length > 0 || articleItems.length > 0) {
       doc.moveDown(0.3);
       doc.moveTo(L, doc.y).lineTo(R, doc.y).strokeColor('#888888').stroke();
       doc.moveDown(0.4);
@@ -330,4 +406,4 @@ function buildPdf(invoice, machineLines = [], articleItems = []) {
   });
 }
 
-module.exports = { previewInvoice, createInvoice, generateInvoicePdf, getInvoiceMachineLines, calcMachinePrice };
+module.exports = { previewInvoice, createInvoice, generateInvoicePdf, getInvoiceMachineLines, recalcMachineLine, calcMachinePrice };

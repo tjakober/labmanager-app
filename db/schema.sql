@@ -131,7 +131,29 @@ CREATE TABLE `fachgruppen` (
   UNIQUE KEY `webling_group_id` (`webling_group_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=31 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `invoice_machine_lines`;
 DROP TABLE IF EXISTS `invoice_items`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `invoice_machine_lines` (
+  `id`            int           NOT NULL AUTO_INCREMENT,
+  `invoice_id`    int           NOT NULL,
+  `machine_id`    int           DEFAULT NULL,
+  `machine_name`  varchar(100)  COLLATE utf8mb4_unicode_ci NOT NULL,
+  `usage_seconds` int           NOT NULL DEFAULT '0',
+  `period`        int           NOT NULL DEFAULT '0',
+  `min_periods`   int           NOT NULL DEFAULT '1',
+  `min_price`     decimal(10,2) DEFAULT NULL,
+  `price`         decimal(10,2) NOT NULL,
+  `line_price`    decimal(10,2) NOT NULL,
+  `konto_nr`      varchar(20)   COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `start_iso`     varchar(30)   COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `sort_order`    int           NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `invoice_id` (`invoice_id`),
+  CONSTRAINT `iml_invoice_fk` FOREIGN KEY (`invoice_id`) REFERENCES `invoices` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `invoice_items` (

@@ -1202,6 +1202,30 @@ router.post('/members/:id/invoice', requireRole('admin', 'labmanager'), async (r
     }
 
     const { invoiceId, total, lines } = await billingService.createInvoice(userId, paymode_id, items, req.user.id);
+
+    // Labmanager-Rabatt: prüfen ob Member die labmanager-Rolle hat
+    const machineSubtotal = +lines.reduce((s, l) => s + l.linePrice, 0).toFixed(2);
+    if (machineSubtotal > 0) {
+      const memberRoles = await db.query(Q.getUserRoles, [userId]);
+      const isLabmanager = memberRoles.some(r => r.name === 'labmanager');
+      if (isLabmanager) {
+        const discountPct = +(await configService.get('invoice.labmanager_discount') || 0);
+        if (discountPct > 0) {
+          const discountAmt = +(machineSubtotal * discountPct / 100).toFixed(2);
+          await db.query(Q.insertInvoiceItem, [
+            invoiceId,
+            `Labmanager-Rabatt ${discountPct}% auf Maschinenzeit`,
+            1,
+            -discountAmt,
+            -discountAmt,
+            null,
+            1,
+          ]);
+          await db.query('UPDATE invoices SET total = total - ? WHERE id = ?', [discountAmt, invoiceId]);
+        }
+      }
+    }
+
     await billingService.generateInvoicePdf(invoiceId, userId);
 
     // Webling-Buchung wenn Rechnung sofort bezahlt wird (best-effort)
@@ -1469,6 +1493,45 @@ router.delete('/invoices/:id/items/:item_id', requireRole('admin', 'labmanager')
     res.json({ ok: true, new_total: newTotal });
   } catch (err) {
     console.error('[browser/invoices/:id/items DELETE]', err.message);
+    res.status(500).json({ error: err.message || 'Server-Fehler' });
+  }
+});
+
+/**
+ * PATCH /api/browser/invoices/:id/machine-lines/:lid
+ * Nutzungszeit einer Maschinenzeile anpassen → Preis neu berechnen → Rechnungstotal aktualisieren.
+ * Body: { usage_seconds: number }
+ */
+router.patch('/invoices/:id/machine-lines/:lid', requireRole('admin', 'labmanager'), async (req, res) => {
+  const invoiceId = parseInt(req.params.id);
+  const lineId    = parseInt(req.params.lid);
+  const { usage_seconds } = req.body;
+
+  if (!Number.isFinite(usage_seconds) || usage_seconds < 0) {
+    return res.status(400).json({ error: 'usage_seconds muss eine nicht-negative Zahl sein' });
+  }
+
+  try {
+    const invoice = await db.queryOne(Q.getInvoiceById, [invoiceId]);
+    if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+    if (invoice.paymode_id) return res.status(409).json({ error: 'Rechnung bereits bezahlt' });
+
+    // Alte Zeile laden um Preisdifferenz zu berechnen
+    const oldLines = await db.query(Q.getMachineLines, [invoiceId]);
+    const oldLine  = oldLines.find(l => Number(l.id) === lineId);
+    if (!oldLine) return res.status(404).json({ error: 'Maschinenzeile nicht gefunden' });
+    const oldPrice = parseFloat(oldLine.line_price);
+
+    const { line_price: newPrice } = await billingService.recalcMachineLine(invoiceId, lineId, usage_seconds);
+
+    // Rechnungstotal anpassen (Differenz)
+    const delta    = +(newPrice - oldPrice).toFixed(2);
+    const newTotal = +(Number(invoice.total) + delta).toFixed(2);
+    await db.query('UPDATE invoices SET total = ? WHERE id = ?', [newTotal, invoiceId]);
+
+    res.json({ ok: true, line_price: newPrice, new_total: newTotal });
+  } catch (err) {
+    console.error('[browser/invoices/:id/machine-lines PATCH]', err.message);
     res.status(500).json({ error: err.message || 'Server-Fehler' });
   }
 });

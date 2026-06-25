@@ -629,6 +629,23 @@ module.exports = {
   deleteInvoiceItem: `
     DELETE FROM invoice_items WHERE id = ? AND invoice_id = ?`,
 
+  // ── invoice_machine_lines ──────────────────────────────────────────────────
+
+  insertMachineLine: `
+    INSERT INTO invoice_machine_lines
+      (invoice_id, machine_id, machine_name, usage_seconds, period, min_periods, min_price, price, line_price, konto_nr, start_iso, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
+  getMachineLines: `
+    SELECT id, machine_id, machine_name, usage_seconds, period, min_periods, min_price, price, line_price, konto_nr, start_iso
+    FROM invoice_machine_lines WHERE invoice_id = ? ORDER BY sort_order ASC, id ASC`,
+
+  updateMachineLineUsage: `
+    UPDATE invoice_machine_lines SET usage_seconds = ?, line_price = ? WHERE id = ? AND invoice_id = ?`,
+
+  deleteMachineLines: `
+    DELETE FROM invoice_machine_lines WHERE invoice_id = ?`,
+
   // ── Upgrades ───────────────────────────────────────────────────────────────
 
   getExpiredUpgrades: `
