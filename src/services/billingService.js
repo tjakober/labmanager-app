@@ -18,6 +18,8 @@ const Q           = require('../db/queries');
 // Sessions on the same machine+day are aggregated before calling this.
 // min_periods is therefore only applied once per machine per day.
 function calcMachinePrice(usageSeconds, machine) {
+  if (usageSeconds === 0) return 0;
+
   const { period, min_periods, min_price, price } = machine;
   const periodSeconds = period * 60;   // period stored in minutes → convert to seconds
   const unitPrice     = parseFloat(price);
