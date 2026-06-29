@@ -1097,47 +1097,110 @@
       </div>
     </div>
 
-    <!-- ══ Machine Status ═════════════════════════════════════════════════════ -->
-    <div x-show="view === 'machine-status'" class="p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-bold text-gray-800">Maschinenbelegung</h2>
-        <span class="text-xs text-gray-400">Aktualisierung alle 15 s</span>
+    <!-- ══ Labmanager ════════════════════════════════════════════════════════ -->
+    <div x-show="view === 'labmanager'">
+      <!-- Tab-Nav -->
+      <div class="border-b border-gray-200 px-6 pt-4">
+        <nav class="flex gap-1">
+          <template x-for="t in [{id:'belegung',label:'Belegung'},{id:'rapport',label:'Rapport'},{id:'kassenblatt',label:'Kassenblatt'}]" :key="t.id">
+            <button @click="openLabmanagerTab(t.id)"
+              class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors"
+              :class="labmanagerTab === t.id
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'">
+              <span x-text="t.label"></span>
+            </button>
+          </template>
+        </nav>
       </div>
 
-      <div x-show="machineStatus.length === 0" class="text-gray-400 text-sm">Lädt…</div>
-
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <template x-for="m in machineStatus" :key="m.id">
-          <div class="bg-white rounded-xl border p-4 flex flex-col gap-2"
-               :class="m.in_use ? 'border-green-300 shadow-sm' : 'border-gray-200'">
-
-            <!-- Maschinennamen + Status-Dot -->
-            <div class="flex items-start justify-between gap-1">
-              <span class="font-semibold text-sm text-gray-800 leading-tight" x-text="m.name"></span>
-              <span class="mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    :class="m.in_use ? 'bg-green-500' : 'bg-gray-300'"></span>
-            </div>
-
-            <!-- Belegt -->
-            <template x-if="m.in_use">
-              <div class="space-y-0.5">
-                <p class="text-sm font-medium text-green-700" x-text="m.user_name || '–'"></p>
-                <p class="text-xs text-gray-500 tabular-nums"
-                   x-text="machineElapsed(m) != null ? fmtDuration(machineElapsed(m)) : ''"></p>
+      <!-- Tab: Belegung -->
+      <div x-show="labmanagerTab === 'belegung'" class="p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold text-gray-800">Maschinenbelegung</h2>
+          <span class="text-xs text-gray-400">Aktualisierung alle 15 s</span>
+        </div>
+        <div x-show="machineStatus.length === 0" class="text-gray-400 text-sm">Lädt…</div>
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          <template x-for="m in machineStatus" :key="m.id">
+            <div class="bg-white rounded-xl border p-4 flex flex-col gap-2"
+                 :class="m.in_use ? 'border-green-300 shadow-sm' : 'border-gray-200'">
+              <div class="flex items-start justify-between gap-1">
+                <span class="font-semibold text-sm text-gray-800 leading-tight" x-text="m.name"></span>
+                <span class="mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      :class="m.in_use ? 'bg-green-500' : 'bg-gray-300'"></span>
               </div>
-            </template>
+              <template x-if="m.in_use">
+                <div class="space-y-0.5">
+                  <p class="text-sm font-medium text-green-700" x-text="m.user_name || '–'"></p>
+                  <p class="text-xs text-gray-500 tabular-nums"
+                     x-text="machineElapsed(m) != null ? fmtDuration(machineElapsed(m)) : ''"></p>
+                </div>
+              </template>
+              <template x-if="!m.in_use">
+                <p class="text-sm text-gray-400">Frei</p>
+              </template>
+              <p class="text-xs text-gray-300 mt-auto"
+                 x-text="heartbeatAgo(m) ? '● ' + heartbeatAgo(m) : ''"
+                 :title="m.last_heartbeat ? 'Letzter Heartbeat: ' + m.last_heartbeat : 'Kein Heartbeat'"></p>
+            </div>
+          </template>
+        </div>
+      </div>
 
-            <!-- Frei -->
-            <template x-if="!m.in_use">
-              <p class="text-sm text-gray-400">Frei</p>
-            </template>
+      <!-- Tab: Rapport -->
+      <div x-show="labmanagerTab === 'rapport'" class="p-6 max-w-lg">
+        <h2 class="text-xl font-bold text-gray-800 mb-1">Dienst-Rapport</h2>
+        <p class="text-xs text-gray-400 mb-5"
+           x-text="'Seit Login: ' + (_loginAt ? new Date(_loginAt).toLocaleTimeString('de-CH', {hour:'2-digit',minute:'2-digit'}) : '–')"></p>
 
-            <!-- Heartbeat -->
-            <p class="text-xs text-gray-300 mt-auto"
-               x-text="heartbeatAgo(m) ? '● ' + heartbeatAgo(m) : ''"
-               :title="m.last_heartbeat ? 'Letzter Heartbeat: ' + m.last_heartbeat : 'Kein Heartbeat'"></p>
+        <!-- Mitglieder-Liste -->
+        <div class="bg-white rounded-xl border p-4 mb-4">
+          <h3 class="font-semibold text-gray-800 text-sm mb-3">Mitglieder an Maschinen</h3>
+          <div x-show="rapportUsers.length === 0" class="text-sm text-gray-400">Keine Maschinennutzung seit Login.</div>
+          <ul x-show="rapportUsers.length > 0" class="space-y-1 mb-3">
+            <template x-for="u in rapportUsers" :key="u.id">
+              <li class="text-sm text-gray-700 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0"></span>
+                <span x-text="u.name"></span>
+              </li>
+            </template>
+          </ul>
+          <div class="flex items-center gap-3">
+            <label class="text-sm text-gray-600 w-32 shrink-0">Anzahl Mitglieder</label>
+            <input type="number" min="0" x-model.number="rapportMembers"
+              class="w-24 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           </div>
-        </template>
+        </div>
+
+        <!-- Besucher + Bemerkungen -->
+        <div class="bg-white rounded-xl border p-4 space-y-3">
+          <div class="flex items-center gap-3">
+            <label class="text-sm text-gray-600 w-32 shrink-0">Besucher</label>
+            <input type="number" min="0" x-model.number="rapportVisitors"
+              class="w-24 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-sm text-gray-600 mb-1">Bemerkungen</label>
+            <textarea x-model="rapportNotes" rows="4" placeholder="Besondere Vorkommnisse, Reparaturen, …"
+              class="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center gap-3">
+          <button @click="saveRapport" :disabled="rapportSaving || rapportSaved"
+            class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors">
+            <span x-text="rapportSaving ? 'Speichern…' : rapportSaved ? '✓ Gespeichert' : 'Rapport speichern'"></span>
+          </button>
+          <button x-show="rapportSaved" @click="loadRapport"
+            class="text-sm text-gray-400 hover:text-blue-600">Neu erfassen</button>
+        </div>
+      </div>
+
+      <!-- Tab: Kassenblatt -->
+      <div x-show="labmanagerTab === 'kassenblatt'" class="p-6">
+        <h2 class="text-xl font-bold text-gray-800 mb-2">Kassenblatt</h2>
+        <p class="text-sm text-gray-400">Kommt in einem nächsten Schritt.</p>
       </div>
     </div>
 
@@ -2083,6 +2146,14 @@ function app() {
     profileContactSaving: false,
     exportLoading: false,
     exportError: '',
+    labmanagerTab: 'belegung',
+    rapportUsers: [],
+    rapportMembers: 0,
+    rapportVisitors: 0,
+    rapportNotes: '',
+    rapportSaving: false,
+    rapportSaved: false,
+    _loginAt: localStorage.getItem('flw_login_at') || null,
     prefWeekday: '',
     prefPriority: 5,
     prefMaxPerMonth: 4,
@@ -2145,7 +2216,7 @@ function app() {
       if (!this.isPrivileged) items.push({ id: 'my-account',  icon: '🏠', label: 'Mein Konto' });
       if (this.isPrivileged) items.push({ id: 'members',     icon: '👥', label: 'Mitglieder' });
       if (this.isLabmanager) items.push({ id: 'assignments', icon: '📅', label: 'Einsatzplanung' });
-      if (this.isLabmanager) items.push({ id: 'machine-status', icon: '🖥️', label: 'Belegung' });
+      if (this.isLabmanager) items.push({ id: 'labmanager',  icon: '🖥️', label: 'Labmanager' });
       if (this.isLabmanager) items.push({ id: 'settings',    icon: '⚙️', label: 'Einstellungen' });
       if (this.isAdmin)      items.push({ id: 'export',     icon: '💾', label: 'Datenexport' });
       items.push(              { id: 'profile',    icon: '👤', label: 'Profil' });
@@ -2171,6 +2242,8 @@ function app() {
         this.user  = data.user;
         localStorage.setItem('flw_token', data.token);
         localStorage.setItem('flw_user',  JSON.stringify(data.user));
+        this._loginAt = new Date().toISOString();
+        localStorage.setItem('flw_login_at', this._loginAt);
         this._scheduleAutoLogout(data.token);
         this.loginBadgeUid = '';
         this._initDateRange();
@@ -2189,6 +2262,8 @@ function app() {
       this.user  = null;
       localStorage.removeItem('flw_token');
       localStorage.removeItem('flw_user');
+      localStorage.removeItem('flw_login_at');
+      this._loginAt = null;
       this.members          = [];
       this.selectedMember   = null;
       this.assignments      = [];
@@ -2215,7 +2290,7 @@ function app() {
     // ── Navigation ────────────────────────────────────────────────────────────
     async navigate(id) {
       this.view = id;
-      if (id !== 'machine-status') this._stopMachineStatusPoll();
+      if (id !== 'labmanager') this._stopMachineStatusPoll();
       if (id === 'members') {
         if (this.members.length === 0) await this.loadMembers();
         if (!this.membersSummary) this._loadMembersSummary();
@@ -2223,7 +2298,7 @@ function app() {
       if (id === 'assignments')    await this.loadAssignments();
       if (id === 'settings')       await this.loadSettings();
       if (id === 'profile')        { await this.loadPreferences(); await this.loadProfileContact(); }
-      if (id === 'machine-status') await this._startMachineStatusPoll();
+      if (id === 'labmanager')     await this.openLabmanagerTab(this.labmanagerTab || 'belegung');
       if (id === 'my-account')     await this.loadMyAccount();
     },
 
@@ -3611,6 +3686,51 @@ function app() {
         this.exportError = err.message;
       } finally {
         this.exportLoading = false;
+      }
+    },
+
+    // ── Labmanager-Bereich ────────────────────────────────────────────────────
+    async openLabmanagerTab(tab) {
+      this.labmanagerTab = tab;
+      if (tab === 'belegung') {
+        await this._startMachineStatusPoll();
+      } else {
+        this._stopMachineStatusPoll();
+      }
+      if (tab === 'rapport') {
+        await this.loadRapport();
+      }
+    },
+
+    async loadRapport() {
+      this.rapportSaved = false;
+      const since = this._loginAt || new Date().toISOString();
+      try {
+        const res = await this._get(`/api/browser/shift-report/users?since=${encodeURIComponent(since)}`);
+        this.rapportUsers   = res.users || [];
+        this.rapportMembers = this.rapportUsers.length;
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    },
+
+    async saveRapport() {
+      if (this.rapportSaving) return;
+      this.rapportSaving = true;
+      try {
+        await this._post('/api/browser/shift-report', {
+          members:  this.rapportMembers,
+          visitors: this.rapportVisitors,
+          notes:    this.rapportNotes,
+        });
+        this.rapportSaved    = true;
+        this.rapportVisitors = 0;
+        this.rapportNotes    = '';
+        this.showToast('Rapport gespeichert');
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      } finally {
+        this.rapportSaving = false;
       }
     },
 

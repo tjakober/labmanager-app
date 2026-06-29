@@ -453,6 +453,20 @@ CREATE TABLE `users` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
+CREATE TABLE IF NOT EXISTS `shift_reports` (
+  `id`             int NOT NULL AUTO_INCREMENT,
+  `datum`          date NOT NULL,
+  `labmanager_id`  int NOT NULL,
+  `members`        int NOT NULL DEFAULT '0',
+  `visitors`       int NOT NULL DEFAULT '0',
+  `cashbox`        decimal(5,2) DEFAULT NULL,
+  `notes`          text,
+  `created_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `labmanager_id` (`labmanager_id`),
+  CONSTRAINT `shift_reports_ibfk_1` FOREIGN KEY (`labmanager_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
 /*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;

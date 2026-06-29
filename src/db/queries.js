@@ -489,6 +489,29 @@ module.exports = {
     WHERE m.active = 1
     ORDER BY m.name ASC`,
 
+  // ── Shift Reports ─────────────────────────────────────────────────────────
+
+  getMachineUsersAfter: `
+    SELECT DISTINCT u.id, u.name
+    FROM logs l
+    JOIN tags  t ON t.id = l.tag_id
+    JOIN users u ON u.id = t.user_id
+    WHERE l.created_at >= ?
+      AND u.id <> ?
+    ORDER BY u.name ASC`,
+
+  insertShiftReport: `
+    INSERT INTO shift_reports (datum, labmanager_id, members, visitors, cashbox, notes)
+    VALUES (CURDATE(), ?, ?, ?, ?, ?)`,
+
+  getShiftReports: `
+    SELECT sr.id, sr.datum, sr.members, sr.visitors, sr.cashbox, sr.notes,
+           u.name AS labmanager_name
+    FROM shift_reports sr
+    JOIN users u ON u.id = sr.labmanager_id
+    ORDER BY sr.datum DESC, sr.id DESC
+    LIMIT 50`,
+
   // ── Firmware-kompatible Endpunkte ─────────────────────────────────────────
 
   getFirmwareMachineConfig: `

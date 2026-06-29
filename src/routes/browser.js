@@ -1685,6 +1685,53 @@ router.post('/webling/sync', requireRole('admin'), async (req, res) => {
   }
 });
 
+// ── Shift Reports ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/browser/shift-report/users?since=ISO
+ * Mitglieder, die seit `since` an Maschinen aktiv waren (exkl. eigener Labmanager).
+ */
+router.get('/shift-report/users', requireRole('admin', 'labmanager'), async (req, res) => {
+  const since = req.query.since;
+  if (!since) return res.status(400).json({ error: 'since fehlt' });
+  try {
+    const users = await db.query(Q.getMachineUsersAfter, [since, req.user.id]);
+    res.json({ users });
+  } catch (err) {
+    console.error('[shift-report/users]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/browser/shift-report
+ * Body: { members, visitors, notes }
+ */
+router.post('/shift-report', requireRole('admin', 'labmanager'), async (req, res) => {
+  const { members, visitors, notes = '' } = req.body;
+  if (members == null || visitors == null) return res.status(400).json({ error: 'members und visitors erforderlich' });
+  try {
+    const result = await db.query(Q.insertShiftReport, [req.user.id, members, visitors, null, notes]);
+    res.status(201).json({ ok: true, id: Number(result.insertId) });
+  } catch (err) {
+    console.error('[shift-report POST]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/browser/shift-reports
+ */
+router.get('/shift-reports', requireRole('admin', 'labmanager'), async (req, res) => {
+  try {
+    const reports = await db.query(Q.getShiftReports);
+    res.json({ reports });
+  } catch (err) {
+    console.error('[shift-reports GET]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── SQL Export (admin) ────────────────────────────────────────────────────────
 
 router.get('/export/sql', requireRole('admin'), async (req, res) => {
