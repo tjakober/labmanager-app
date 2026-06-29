@@ -137,7 +137,7 @@ DEPLOY-SYNOLOGY.md          Schritt-für-Schritt Anleitung für Synology NAS
 | `balance.max_deposit` | number | `500` | Max. Guthaben pro Mitglied (CHF) |
 | `balance.gift_credit_account` | string | `''` | Webling-Konto HABEN bei Guthaben-Schenkung (z.B. `1001`) |
 | `balance.gift_accounts` | json | `[]` | Konti für Guthaben-Schenkung: `[{konto_nr, bezeichnung, fachgruppe?}]` |
-| `right.default_days` | number | `365` | Standard-Laufzeit für neue Maschinenrechte in Tagen |
+| `right.default_days` | number | `365` | Standard-Laufzeit für neue Maschinenrechte in Tagen (0 = unlimitiert) |
 | `tag.deposit_amount` | number | `20` | Depot-Gebühr für Ersatzkarte (CHF) |
 | `upgrade.expire_notify_emails` | json | `[]` | Empfänger bei Upgrade-Ablauf |
 | `upgrade.notify_emails` | json | `[]` | Empfänger Upgrade-Meldungen |

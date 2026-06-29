@@ -6,7 +6,7 @@ INSERT INTO config (`key`, value, type, description)
 VALUES
   ('balance.credit_accounts',     '["1000","1001"]', 'json',    'Erlaubte Gegenkonten Einzahlung'),
   ('balance.max_deposit',         '500',             'number',  'Max. Guthaben pro Mitglied (CHF)'),
-  ('right.default_days',          '365',             'number',  'Standard-Laufzeit für neue Maschinenrechte in Tagen'),
+  ('right.default_days',          '365',             'number',  'Standard-Laufzeit für neue Maschinenrechte in Tagen (0 = unlimitiert)'),
   ('tag.deposit_amount',          '20',              'number',  'Depot-Gebühr für Ersatzkarte (CHF)'),
   ('upgrade.expire_notify_emails','[]',              'json',    'Empfänger bei Upgrade-Ablauf'),
   ('upgrade.notify_emails',       '[]',              'json',    'Empfänger Upgrade-Meldungen'),

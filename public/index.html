@@ -426,9 +426,11 @@
                                 <input type="date"
                                   :value="getRightForMachine(m.id).valid_to?.slice(0,10) || ''"
                                   @change="updateRightDate(getRightForMachine(m.id), 'valid_to', $event.target.value)"
+                                  :class="!getRightForMachine(m.id).valid_to ? 'border-blue-300 bg-blue-50' : ''"
                                   class="border rounded px-1.5 py-0.5 text-xs w-32">
                                 <button @click="clearRightDate(getRightForMachine(m.id))"
-                                  class="text-gray-400 hover:text-gray-600" title="Ablaufdatum löschen">×</button>
+                                  :class="!getRightForMachine(m.id).valid_to ? 'text-blue-500' : 'text-gray-400 hover:text-gray-600'"
+                                  title="Unlimitiert (kein Ablaufdatum)">∞</button>
                               </div>
                             </template>
                           </div>
@@ -2588,10 +2590,10 @@ function app() {
           String(d.getMonth()+1).padStart(2,'0') + '-' +
           String(d.getDate()).padStart(2,'0');
         const today = new Date();
-        const end   = new Date(today);
-        end.setDate(end.getDate() + this.rightDefaultDays);
         const valid_from = toLocal(today);
-        const valid_to   = toLocal(end);
+        const valid_to = this.rightDefaultDays > 0
+          ? (() => { const e = new Date(today); e.setDate(e.getDate() + this.rightDefaultDays); return toLocal(e); })()
+          : null;
         try {
           await this._post('/api/browser/rights', {
             tag_id:     this.rightsActiveTagId,
@@ -2644,9 +2646,9 @@ function app() {
         String(d.getMonth() + 1).padStart(2, '0') + '-' +
         String(d.getDate()).padStart(2, '0');
       const validFrom = toLocal(today);
-      const validToDate = new Date(today);
-      validToDate.setDate(validToDate.getDate() + this.rightDefaultDays);
-      const validTo = toLocal(validToDate);
+      const validTo = this.rightDefaultDays > 0
+        ? (() => { const e = new Date(today); e.setDate(e.getDate() + this.rightDefaultDays); return toLocal(e); })()
+        : null;
       this.addRight = {
         tag_id:     this.memberTags.find(t => !t.blocked)?.id || '',
         machine_id: '',
